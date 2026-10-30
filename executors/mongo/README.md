@@ -2,6 +2,8 @@
 
 Step to execute actions on a MongoDB database.
 
+**Server version:** MongoDB 4.4 or later. The executor uses the official Go driver v2, which refuses older servers (the v1 driver accepted 3.6 and later). Venom's own suites run against MongoDB 8.2.
+
 ## Input
 
 See also [tests/mongo.yml](../../tests/mongo.yml) for executable examples.

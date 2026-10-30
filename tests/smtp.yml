@@ -1,11 +1,11 @@
 name: SMTP testsuite
 vars:
   withTLS: false
-  imapHost: localhost
+  imapHost: "{{.stackHost}}"
   imapPort: 1143
   imapUser: address@example.org
   imapPassword: pass
-  smtpHost: localhost
+  smtpHost: "{{.stackHost}}"
   smtpPort: 1025
 testcases:
   - name: Clear all mailboxes

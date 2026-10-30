@@ -9,9 +9,10 @@ import (
 	"strings"
 
 	"github.com/gosimple/slug"
+	"github.com/ovh/venom/internal/yamljson"
 	"github.com/ovh/venom/interpolate"
 	"github.com/pkg/errors"
-	"github.com/rockbears/yaml"
+	"github.com/sirupsen/logrus"
 )
 
 // Executor execute a testStep.
@@ -160,12 +161,25 @@ type ExecutorWithSetup interface {
 	TearDown(ctx context.Context) error
 }
 
+// dumpExecutorResult is the dump function GetExecutorResult uses; a package variable so a test can make it fail
+// (a Dump error is otherwise unreachable).
+var dumpExecutorResult = Dump
+
+// GetExecutorResult dumps an executor result into a flat map.
+//
+// It panics when the dump fails. The signature and the panic are kept for the plugins built against this module;
+// the engine itself calls getExecutorResult and handles the error.
 func GetExecutorResult(r interface{}) map[string]interface{} {
-	d, err := Dump(r)
+	d, err := getExecutorResult(r)
 	if err != nil {
 		panic(err)
 	}
 	return d
+}
+
+// getExecutorResult is GetExecutorResult with the dump error returned instead of raised.
+func getExecutorResult(r interface{}) (map[string]interface{}, error) {
+	return dumpExecutorResult(r)
 }
 
 type UserExecutor struct {
@@ -179,7 +193,7 @@ type UserExecutor struct {
 }
 
 // Run is not implemented on user executor
-func (ux UserExecutor) Run(ctx context.Context, step TestStep) (interface{}, error) {
+func (ux UserExecutor) Run(_ context.Context, _ TestStep) (interface{}, error) {
 	return nil, errors.New("Run not implemented for user interface, use RunUserExecutor instead")
 }
 
@@ -205,72 +219,227 @@ func (ux UserExecutor) ZeroValueResult() interface{} {
 
 // RunUserExecutor runs a user executor with the given context, runner, test case, test step result, and step.
 func (v *Venom) RunUserExecutor(ctx context.Context, runner ExecutorRunner, tcIn *TestCase, tsIn *TestStepResult, step TestStep) (interface{}, error) {
-	vrs := tcIn.TestSuiteVars.Clone()
-	ux := runner.GetExecutor().(UserExecutor)
-	var tsVars map[string]string
+	ux, ok := runner.GetExecutor().(UserExecutor)
+	if !ok {
+		return nil, fmt.Errorf("RunUserExecutor called with a runner whose executor is not a UserExecutor (got %T)", runner.GetExecutor())
+	}
+	call, err := prepareUserExecutor(ux, step, tcIn)
+	if err != nil {
+		return nil, err
+	}
+	tc := call.tc
+	ux.Output = call.output
+
+	Debug(ctx, "running user executor %v", tc.Name)
+	if logger.Logger.IsLevelEnabled(logrus.DebugLevel) {
+		Debug(ctx, "with vars: %v", tc.fullVars(tc.Vars))
+	}
+
+	v.runTestSteps(ctx, tc, tsIn)
+
+	mergeUserExecutorResults(tsIn, tc.TestStepResults)
+
+	return userExecutorResult(ctx, ux, tc, tsIn, call.sanitized)
+}
+
+// userExecutorCall is a user executor ready to run: the test case that holds its steps, the output it declares and the
+// text its steps were read from.
+type userExecutorCall struct {
+	tc        *TestCase
+	output    json.RawMessage
+	sanitized string
+}
+
+// prepareUserExecutor interpolates the inputs and the steps of ux for step, and builds the test case that runs them.
+func prepareUserExecutor(ux UserExecutor, step TestStep, tcIn *TestCase) (*userExecutorCall, error) {
+	vrs, over := userExecutorStartVars(tcIn)
+	var tsVars scopeLayers
 	newUX := UserExecutor{}
 	var err error
 
-	// process inputs
 	if len(ux.RawInputs) != 0 {
-		tsVars, err = DumpString(vrs)
+		vrs, tsVars, over, err = addUserExecutorInputs(ux, step, vrs, &newUX, tcIn.suite, over)
 		if err != nil {
-			return nil, errors.Wrapf(err, "error processing executor inputs: unable to dump testsuite vars")
-		}
-
-		interpolatedInput, err := interpolate.Do(string(ux.RawInputs), tsVars)
-		if err != nil {
-			return nil, errors.Wrapf(err, "unable to interpolate executor inputs %q", ux.Executor)
-		}
-
-		err = yaml.Unmarshal([]byte(interpolatedInput), &newUX)
-		if err != nil {
-			return nil, errors.Wrapf(err, "unable to unmarshal inputs for executor %q - raw interpolated:\n%v", ux.Executor, string(interpolatedInput))
-		}
-
-		for k, va := range newUX.Input {
-			if strings.HasPrefix(k, "input.") {
-				// do not reinject input.vars from parent user executor if exists
-				continue
-			} else if !strings.HasPrefix(k, "venom") {
-				if vl, ok := step[k]; ok && vl != nil && vl != "" { // value from step and not nil/empty
-					vrs.AddWithPrefix("input", k, vl)
-				} else { // default value from executor
-					vrs.AddWithPrefix("input", k, va)
-				}
-			} else {
-				vrs.Add(k, va)
-			}
-		}
-		tsVars, err = DumpString(vrs)
-		if err != nil {
-			return nil, errors.Wrapf(err, "error processing executor inputs: unable to dump testsuite vars")
+			return nil, err
 		}
 	}
 
-	interpolatedFull, err := interpolate.Do(string(ux.Raw), tsVars)
+	interpolatedFull, err := tsVars.do(protectLaterActions(string(ux.Raw), func(name string) bool { _, ok := tsVars.get(name); return ok }))
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to interpolate executor %q", ux.Executor)
 	}
 	// quote any remaining template expressions to ensure proper YAML parsing
 	sanitized := quoteTemplateExpressions([]byte(interpolatedFull))
 
-	err = yaml.Unmarshal([]byte(sanitized), &newUX)
+	err = yamljson.Unmarshal(sanitized, &newUX)
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to unmarshal executor %q - raw interpolated :\n%v", ux.Executor, string(sanitized))
 	}
-	ux.Output = newUX.Output
 
+	tc := newUserExecutorTestCase(ux, vrs, newUX.TestSteps, tcIn)
+	tc.varsOverSuite = over
+	return &userExecutorCall{tc: tc, output: newUX.Output, sanitized: string(sanitized)}, nil
+}
+
+// userExecutorStartVars returns the variables the inner test case of a custom executor starts from: a copy of the suite's,
+// or, when the root case has a prepared suite, none, and true: the case then holds its own variables over the suite's,
+// which are shared and never copied (#2475).
+func userExecutorStartVars(tcIn *TestCase) (H, bool) {
+	if tcIn.suite.prepared() != nil {
+		return H{}, true
+	}
+	return tcIn.TestSuiteVars.Clone(), false
+}
+
+// userExecutorResult builds what RunUserExecutor returns once the inner steps have run: the executor's output, or the
+// failure of one of them.
+func userExecutorResult(ctx context.Context, ux UserExecutor, tc *TestCase, tsIn *TestStepResult, sanitized string) (interface{}, error) {
+	outputResult, err := interpolateUserExecutorOutput(ux.Output, tc.computedVars)
+	if err != nil {
+		return nil, err
+	}
+
+	// here, we have the user executor results.
+	// and for each key in output, we try to add the json version
+	// this will allow user to use json version of output (map, etc...)
+	// because, it's not possible to to that:
+	// output:
+	//   therawout: {{.result.systemout}}
+	//
+	// test is in file user_executor.yml
+
+	result, err := Dump(outputResult)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to compute result")
+	}
+
+	if len(tsIn.Errors) > 0 {
+		Error(ctx, "user executor %q failed - raw interpolated:\n%v\n", ux.Executor, sanitized)
+		return outputResult, fmt.Errorf("executor %q failed", ux.Executor)
+	}
+
+	if err := addUserExecutorJSONOutputs(result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// processUserExecutorInputs interpolates the executor's inputs into newUX and adds them to vrs, the whole scope of the
+// case, the step's values winning over the defaults; it returns vrs and its dump.
+func processUserExecutorInputs(ux UserExecutor, step TestStep, vrs H, newUX *UserExecutor, suite *suiteScope) (H, scopeLayers, error) {
+	vrs, tsVars, _, err := addUserExecutorInputs(ux, step, vrs, newUX, suite, false)
+	return vrs, tsVars, err
+}
+
+// addUserExecutorInputs is processUserExecutorInputs for vrs held over the suite's variables when over is true: vrs then
+// holds only the case's own, and the suite's are read through the prepared dump (#2475). It reports false, and returns
+// the whole scope, when the inputs change the suite's variables in a way the prepared dump cannot follow.
+func addUserExecutorInputs(ux UserExecutor, step TestStep, vrs H, newUX *UserExecutor, suite *suiteScope, over bool) (H, scopeLayers, bool, error) {
+	if over && suite.lowerOver() == nil {
+		vrs, over = suite.under(vrs), false
+	}
+	tsVars, err := lowerDumpOf(vrs, suite, over)
+	if err != nil {
+		return nil, scopeLayers{}, over, err
+	}
+
+	interpolatedInput, err := tsVars.do(string(ux.RawInputs))
+	if err != nil {
+		return nil, scopeLayers{}, over, errors.Wrapf(err, "unable to interpolate executor inputs %q", ux.Executor)
+	}
+
+	err = yamljson.Unmarshal([]byte(interpolatedInput), newUX)
+	if err != nil {
+		return nil, scopeLayers{}, over, errors.Wrapf(err, "unable to unmarshal inputs for executor %q - raw interpolated:\n%v", ux.Executor, interpolatedInput)
+	}
+
+	var under H
+	if over {
+		under = suite.src
+	}
+	vrs, edit := setExecutorInputs(step, vrs, under, newUX.Input)
+	// tsVars is the dump of vrs before the inputs; bring it up to date rather than dump the whole scope again (#2465)
+	if edit.applyLayered(tsVars, DumpString, true, "__len__", "__type__") {
+		return vrs, tsVars, over, nil
+	}
+	if over {
+		vrs, over = suite.under(vrs), false
+	}
+	if tsVars, err = lowerDumpOf(vrs, nil, false); err != nil {
+		return nil, scopeLayers{}, over, err
+	}
+	return vrs, tsVars, over, nil
+}
+
+// lowerDumpOf returns the dump of vrs that the inputs of a user executor are interpolated with: layers over the prepared
+// dump of the suite when vrs is the suite's variables, or holds the case's own over them (over), a dump of vrs alone
+// otherwise.
+func lowerDumpOf(vrs H, suite *suiteScope, over bool) (scopeLayers, error) {
+	layers := suite.lowerLayers(vrs)
+	if over {
+		layers = suite.lowerOver()
+	}
+	if layers != nil {
+		return *layers, nil
+	}
+	dump, err := dumpHLowerFirst(vrs)
+	if err != nil {
+		return scopeLayers{}, errors.Wrapf(err, "error processing executor inputs: unable to dump testsuite vars")
+	}
+	return scopeLayers{overlay: dump}, nil
+}
+
+// inputPrefix is the prefix of the variables that carry the inputs of a user executor.
+const inputPrefix = "input."
+
+// setExecutorInputs adds the executor's inputs to vrs, the step's values winning over the defaults, and returns vrs with
+// the edits it made. under holds the variables vrs is laid over, when vrs is only the case's own.
+func setExecutorInputs(step TestStep, vrs, under, inputs H) (H, scopeEdit) {
+	var edit scopeEdit
+	for k, va := range inputs {
+		switch {
+		case strings.HasPrefix(k, inputPrefix):
+			// do not reinject input.vars from parent user executor if exists
+			continue
+		case !strings.HasPrefix(k, "venom"):
+			if vl, ok := step[k]; ok && vl != nil && vl != "" { // value from step and not nil/empty
+				edit.setUnder(vrs, under, inputPrefix+k, vl)
+			} else { // default value from executor
+				edit.setUnder(vrs, under, inputPrefix+k, va)
+			}
+		default:
+			if vrs == nil { // as H.Add does
+				vrs = H{}
+			}
+			edit.setUnder(vrs, under, k, va)
+		}
+	}
+	return vrs, edit
+}
+
+// newUserExecutorTestCase builds the inner test case that runs the steps of a user executor.
+func newUserExecutorTestCase(ux UserExecutor, vrs H, rawTestSteps []json.RawMessage, tcIn *TestCase) *TestCase {
 	tc := &TestCase{
 		TestCaseInput: TestCaseInput{
 			Name:         ux.Executor,
 			Vars:         vrs,
-			RawTestSteps: newUX.TestSteps,
+			RawTestSteps: rawTestSteps,
 		},
 		number:          tcIn.number,
 		TestSuiteVars:   tcIn.TestSuiteVars,
+		suite:           tcIn.suite,
 		IsExecutor:      true,
 		TestStepResults: make([]TestStepResult, 0),
+		// The inner case belongs to the same test file as the one that invoked the user executor,
+		// so it carries that file's printer (#2021).
+		//
+		// Nothing prints through it today: every call site here reaches runTestSteps with a non-nil
+		// tsIn, so fromUserExecutor is true and the step prints are all gated off. This is set so
+		// that the day that gate is lifted, the output is attributed rather than silently untagged.
+		// Whoever lifts it must also deal with the flush: runTestCases flushes when the file's
+		// cases are done, so output produced after that would sit in the buffer and be lost, not
+		// merely untagged.
+		out: tcIn.out,
 	}
 
 	tc.originalName = tc.Name
@@ -279,15 +448,13 @@ func (v *Venom) RunUserExecutor(ctx context.Context, runner ExecutorRunner, tcIn
 	tc.Vars.Add("venom.executor.filename", ux.Filename)
 	tc.Vars.Add("venom.executor.name", ux.Executor)
 	tc.computedVars = H{}
+	return tc
+}
 
-	Debug(ctx, "running user executor %v", tc.Name)
-	Debug(ctx, "with vars: %v", vrs)
-
-	v.runTestSteps(ctx, tc, tsIn)
-
-	// Merge inner step results into the parent test step result so they
-	// appear in JUnit XML, JSON, HTML, and other report outputs.
-	for _, innerResult := range tc.TestStepResults {
+// mergeUserExecutorResults merges inner step results into the parent test step result so they
+// appear in JUnit XML, JSON, HTML, and other report outputs.
+func mergeUserExecutorResults(tsIn *TestStepResult, innerResults []TestStepResult) {
+	for _, innerResult := range innerResults {
 		if len(innerResult.Errors) > 0 {
 			tsIn.Errors = append(tsIn.Errors, innerResult.Errors...)
 		}
@@ -301,8 +468,12 @@ func (v *Venom) RunUserExecutor(ctx context.Context, runner ExecutorRunner, tcIn
 			tsIn.Systemerr += innerResult.Systemerr
 		}
 	}
+}
 
-	computedVars, err := DumpStringPreserveCase(tc.computedVars)
+// interpolateUserExecutorOutput interpolates the executor's `output:` with the vars its steps
+// computed and decodes it.
+func interpolateUserExecutorOutput(uxOutput json.RawMessage, tcComputedVars H) (interface{}, error) {
+	computedVars, err := DumpStringPreserveCase(tcComputedVars)
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to dump testcase computedVars")
 	}
@@ -311,7 +482,7 @@ func (v *Venom) RunUserExecutor(ctx context.Context, runner ExecutorRunner, tcIn
 		Result json.RawMessage `json:"result"`
 	}
 	output := Output{
-		Result: ux.Output,
+		Result: uxOutput,
 	}
 	outputString, err := json.Marshal(output)
 	if err != nil {
@@ -332,60 +503,59 @@ func (v *Venom) RunUserExecutor(ctx context.Context, runner ExecutorRunner, tcIn
 	}
 
 	var outputResult interface{}
-	if err := yaml.Unmarshal([]byte(outputS), &outputResult); err != nil {
+	if err := yamljson.Unmarshal([]byte(outputS), &outputResult); err != nil {
 		return nil, errors.Wrapf(err, "unable to unmarshal")
 	}
+	return outputResult, nil
+}
 
-	// here, we have the user executor results.
-	// and for each key in output, we try to add the json version
-	// this will allow user to use json version of output (map, etc...)
-	// because, it's not possible to to that:
-	// output:
-	//   therawout: {{.result.systemout}}
-	//
-	// test is in file user_executor.yml
-
-	result, err := Dump(outputResult)
-	if err != nil {
-		return nil, errors.Wrapf(err, "unable to compute result")
-	}
-
-	if len(tsIn.Errors) > 0 {
-		Error(ctx, "user executor %q failed - raw interpolated:\n%v\n", ux.Executor, string(sanitized))
-		return outputResult, fmt.Errorf("executor %q failed", ux.Executor)
-	}
-
+// addUserExecutorJSONOutputs adds, next to each string output that holds JSON, its decoded twin
+// under the key suffixed with "json", dumped under that prefix.
+func addUserExecutorJSONOutputs(result map[string]interface{}) error {
 	for k, v := range result {
-		switch z := v.(type) {
-		case string:
-			var outJSON interface{}
-			if err := JSONUnmarshal([]byte(z), &outJSON); err == nil {
-				result[k+"json"] = outJSON
-				// Now we have to dump this object, but the key will change if this is a array or not
-				if reflect.ValueOf(outJSON).Kind() == reflect.Slice {
-					prefix := k + "json"
-					splitPrefix := strings.Split(prefix, ".")
-					prefix += "." + splitPrefix[len(splitPrefix)-1]
-					outJSONDump, err := Dump(outJSON)
-					if err != nil {
-						return nil, errors.Wrapf(err, "unable to compute result")
-					}
-					for ko, vo := range outJSONDump {
-						result[prefix+ko] = vo
-					}
-				} else {
-					outJSONDump, err := DumpWithPrefix(outJSON, k+"json")
-					if err != nil {
-						return nil, errors.Wrapf(err, "unable to compute result")
-					}
-					for ko, vo := range outJSONDump {
-						result[ko] = vo
-					}
-				}
-			}
+		if err := addUserExecutorJSONOutput(result, k, v); err != nil {
+			return err
 		}
 	}
-	return result, nil
+	return nil
+}
+
+// addUserExecutorJSONOutput adds the "json" twin of one output value into result, when that value
+// is a string holding JSON — the per-key body addUserExecutorJSONOutputs ranges over. It mutates
+// the same result map that range is iterating, exactly as before the split (deliberate, see D47 in
+// docs/feat/2031/plan.md): do not change this to collect into a fresh map first.
+func addUserExecutorJSONOutput(result map[string]interface{}, key string, value interface{}) error {
+	z, ok := value.(string)
+	if !ok {
+		return nil
+	}
+	var outJSON interface{}
+	if err := JSONUnmarshal([]byte(z), &outJSON); err != nil {
+		return nil
+	}
+	result[key+"json"] = outJSON
+	// Now we have to dump this object, but the key will change if this is a array or not
+	if reflect.ValueOf(outJSON).Kind() == reflect.Slice {
+		prefix := key + "json"
+		splitPrefix := strings.Split(prefix, ".")
+		prefix += "." + splitPrefix[len(splitPrefix)-1]
+		outJSONDump, err := Dump(outJSON)
+		if err != nil {
+			return errors.Wrapf(err, "unable to compute result")
+		}
+		for ko, vo := range outJSONDump {
+			result[prefix+ko] = vo
+		}
+	} else {
+		outJSONDump, err := DumpWithPrefix(outJSON, key+"json")
+		if err != nil {
+			return errors.Wrapf(err, "unable to compute result")
+		}
+		for ko, vo := range outJSONDump {
+			result[ko] = vo
+		}
+	}
+	return nil
 }
 
 // quoteTemplateExpressions adds double quotes around template expressions in YAML content.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 
 	"github.com/linkedin/goavro/v2"
 )
@@ -16,7 +17,7 @@ const (
 // Convert2Avro will convert value to Avro encoded binary with help of schema
 func Convert2Avro(value []byte, schema string) ([]byte, error) {
 	// https://github.com/linkedin/goavro
-	codec, err := goavro.NewCodec(string(schema))
+	codec, err := goavro.NewCodec(schema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Avro schema: %w", err)
 	}
@@ -63,7 +64,11 @@ func CreateMessage(message []byte, schemaID int) ([]byte, error) {
 		return nil, err
 	}
 
-	// Add schema ID.
+	// Add schema ID. Confluent Schema Registry IDs are always non-negative and fit in 32 bits;
+	// reject anything outside that range instead of silently wrapping the conversion.
+	if schemaID < 0 || int64(schemaID) > math.MaxUint32 {
+		return nil, fmt.Errorf("invalid schema ID %d: must fit in an unsigned 32-bit integer", schemaID)
+	}
 	schemaIDByte := make([]byte, schemaIDSize)
 	binary.BigEndian.PutUint32(schemaIDByte, uint32(schemaID))
 

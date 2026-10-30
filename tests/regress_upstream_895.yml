@@ -1,0 +1,10 @@
+name: Regression upstream 895 - printf in a custom executor that reads a suite variable
+vars:
+  testvar: hello
+testcases:
+- name: printf sees the suite variable
+  steps:
+  - type: regress_upstream_895
+    assertions:
+    - result.printed ShouldContainSubstring P[hello]
+    - result.printed ShouldContainSubstring Q[hello]

@@ -66,3 +66,14 @@ type Execute struct {
 	Command string   `yaml:"command,omitempty"`
 	Args    []string `yaml:"args,omitempty"`
 }
+
+// Mock is a response a step stubs (FR-06): from its step to the end of the test case, every request whose URL matches
+// URL, a Playwright glob, gets it instead of reaching the network (docs/feat/2048/research.md R1, R5). Status 0 is
+// Playwright's 200.
+type Mock struct {
+	URL         string            `yaml:"url,omitempty"`
+	Status      int               `yaml:"status,omitempty"`
+	Headers     map[string]string `yaml:"headers,omitempty"`
+	ContentType string            `yaml:"contentType,omitempty"`
+	Body        string            `yaml:"body,omitempty"`
+}

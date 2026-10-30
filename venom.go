@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/confluentinc/bincover"
 	"github.com/fatih/color"
@@ -50,6 +51,7 @@ func New() *Venom {
 		variables:        map[string]interface{}{},
 		secrets:          map[string]interface{}{},
 		OutputFormat:     "xml",
+		Parallel:         1,
 	}
 	return v
 }
@@ -59,29 +61,185 @@ type Venom struct {
 
 	PrintFunc        func(format string, a ...interface{}) (n int, err error)
 	executorsBuiltin map[string]Executor
-	executorsPlugin  map[string]Executor
 	executorsUser    map[string]Executor
+
+	// executorsPluginMu guards executorsPlugin, the only executor registry written while a run is
+	// in progress. GetExecutorRunner calls registerPlugin unconditionally for any type that is
+	// neither a builtin nor a user executor, so a plugin-typed step re-registers on *every* step,
+	// not once, and with test files running concurrently (#2020) those writes would collide
+	// (#2019).
+	//
+	// The re-registration is deliberate, not an oversight — see the call site in GetExecutorRunner.
+	// It does not meaningfully contend either: the lock covers only the map write, while
+	// plugin.Open and Lookup happen outside it and cost about 1.8 µs whether one file is running
+	// or eight (#2023).
+	//
+	// executorsBuiltin and executorsUser need no lock: both are filled before Process starts — the
+	// builtins at startup, the user executors during Parse — and are only read afterwards.
+	executorsPluginMu sync.RWMutex
+	executorsPlugin   map[string]Executor
 
 	Tests     Tests
 	variables H
 	secrets   H
+	// runSecrets are the names of the variables the run declares as secrets (AddRunSecrets).
+	runSecrets []string
 
 	LibDir        string
 	OutputFormat  string
 	OutputDir     string
 	StopOnFailure bool
-	HtmlReport    bool
-	Verbose       int
+	// StrictVariables makes a step that names an unknown variable fail, instead of keeping the text as written.
+	StrictVariables bool
+	HtmlReport      bool //nolint:revive // exported field kept for module compatibility (plugins, library users, upstream merges)
+	Verbose         int
+
+	// Parallel is how many test files may run at once. 1 (the default) keeps the sequential path
+	// venom has always taken; anything higher runs files through a bounded worker pool (#2020).
+	// An embedder that builds a Venom without New() leaves this at 0, which Process reads as 1.
+	Parallel int
+
+	// printMu serialises console writes when several test files print at once. It is taken only
+	// by a suiteOut that carries a prefix, so the sequential path never touches it (#2021).
+	printMu sync.Mutex
+}
+
+// suiteOut prints the console output of one test file.
+//
+// At --parallel 1 it is transparent: no tag, no lock, exactly the bytes venom has always written.
+// Above 1 several files print at the same time, so every physical line is prefixed with the file it
+// came from and each write is serialised — without that, two goroutines' output tears inside a
+// single line and neither file can be read (#2021).
+type suiteOut struct {
+	v      *Venom
+	prefix string // empty when the run is sequential
+
+	// pending holds the part of a line that has been printed but not yet terminated. venom builds
+	// a line from several calls — the test case name, then its status — so emitting each call as
+	// it arrives let another file's output land in the middle of a line, which is the defect this
+	// buffer exists to prevent.
+	//
+	// It is guarded by v.printMu, the process-wide lock, rather than a per-printer one: the files
+	// are what print concurrently, so the emit has to be serialised across printers anyway, and one
+	// lock covering both the buffer and the write is simpler than two. Today no single file prints
+	// from two goroutines — the only second goroutine is the one a step with a timeout uses
+	// (process_teststep.go), and it cannot reach the console: it runs either an executor, none of
+	// which holds a *Venom, or RunUserExecutor, whose inner steps are all gated on
+	// !fromUserExecutor.
+	pending strings.Builder
+}
+
+// newSuiteOut returns the printer for one test file. The prefix is padded to the widest filename of
+// the run so the tags line up in a column; the file list is fixed before Process starts, so reading
+// it here needs no lock.
+func (v *Venom) newSuiteOut(ts *TestSuite) *suiteOut {
+	if v.Parallel <= 1 {
+		return &suiteOut{v: v}
+	}
+	width := 0
+	for i := range v.Tests.TestSuites {
+		if n := len(v.Tests.TestSuites[i].Filename); n > width {
+			width = n
+		}
+	}
+	return &suiteOut{v: v, prefix: fmt.Sprintf("[%-*s] ", width, ts.Filename)}
+}
+
+// out returns the printer of the test file tc belongs to. It falls back to the untagged printer for
+// a TestCase built outside any suite — a user executor registered as an assertion function
+// (registerUserAssertFunc) has no file to attribute its output to.
+func (v *Venom) out(tc *TestCase) *suiteOut {
+	if tc != nil && tc.out != nil {
+		return tc.out
+	}
+	return &suiteOut{v: v}
+}
+
+func (o *suiteOut) Print(format string, a ...interface{}) {
+	o.write(fmt.Sprintf(format, a...))
+}
+
+func (o *suiteOut) Println(format string, a ...interface{}) {
+	o.write(fmt.Sprintf(format+"\n", a...))
+}
+
+func (o *suiteOut) PrintlnTrace(s string) {
+	o.PrintlnIndentedTrace(s, "")
+}
+
+func (o *suiteOut) PrintlnIndentedTrace(s string, indent string) {
+	o.Println("\t  %s%s %s", indent, trace("[trac]"), trace(s))
+}
+
+// write sends one already-formatted chunk to the console. Without a prefix it goes straight
+// through, which is what keeps the sequential path byte-identical. With one, the chunk joins the
+// pending line and only whole lines are emitted.
+func (o *suiteOut) write(s string) {
+	if o.prefix == "" {
+		o.v.PrintFunc("%s", s) //nolint:errcheck // console write; a failed write to the output stream has nothing to recover
+		return
+	}
+	o.v.printMu.Lock()
+	defer o.v.printMu.Unlock()
+	o.pending.WriteString(s)
+	o.emitCompleteLines()
+}
+
+// emitCompleteLines writes every line that is now terminated and keeps the remainder pending.
+// Callers hold v.printMu.
+func (o *suiteOut) emitCompleteLines() {
+	buf := o.pending.String()
+	end := strings.LastIndex(buf, "\n")
+	if end < 0 {
+		return
+	}
+	o.v.PrintFunc("%s", o.tag(buf[:end+1])) //nolint:errcheck // console write; a failed write to the output stream has nothing to recover
+	rest := buf[end+1:]
+	o.pending.Reset()
+	o.pending.WriteString(rest)
+}
+
+// Flush emits whatever the file left unterminated, so a line in progress is not swallowed when the
+// file ends — an aborted run would otherwise lose the test case it died on.
+func (o *suiteOut) Flush() {
+	if o.prefix == "" {
+		return
+	}
+	o.v.printMu.Lock()
+	defer o.v.printMu.Unlock()
+	if o.pending.Len() == 0 {
+		return
+	}
+	o.v.PrintFunc("%s\n", o.tag(o.pending.String())) //nolint:errcheck // console write; a failed write to the output stream has nothing to recover
+	o.pending.Reset()
+}
+
+// tag prefixes every physical line, not only the first: one call can carry a whole systemout dump,
+// and an untagged continuation line is exactly the line a reader cannot attribute.
+func (o *suiteOut) tag(s string) string {
+	if s == "" {
+		return s
+	}
+	trailing := strings.HasSuffix(s, "\n")
+	lines := strings.Split(strings.TrimSuffix(s, "\n"), "\n")
+	for i := range lines {
+		lines[i] = o.prefix + lines[i]
+	}
+	out := strings.Join(lines, "\n")
+	if trailing {
+		out += "\n"
+	}
+	return out
 }
 
 var trace = color.New(color.Attribute(90)).SprintFunc()
 
 func (v *Venom) Print(format string, a ...interface{}) {
-	v.PrintFunc(format, a...) // nolint
+	v.PrintFunc(format, a...) //nolint:errcheck // console write; a failed write to the output stream has nothing to recover
 }
 
 func (v *Venom) Println(format string, a ...interface{}) {
-	v.PrintFunc(format+"\n", a...) // nolint
+	v.PrintFunc(format+"\n", a...) //nolint:errcheck // console write; a failed write to the output stream has nothing to recover
 }
 
 func (v *Venom) PrintlnTrace(s string) {
@@ -89,7 +247,7 @@ func (v *Venom) PrintlnTrace(s string) {
 }
 
 func (v *Venom) PrintlnIndentedTrace(s string, indent string) {
-	v.Println("\t  %s%s %s", indent, trace("[trac]"), trace(s)) // nolint
+	v.Println("\t  %s%s %s", indent, trace("[trac]"), trace(s))
 }
 
 func (v *Venom) AddVariables(variables map[string]interface{}) {
@@ -104,6 +262,12 @@ func (v *Venom) AddSecrets(secrets map[string]interface{}) {
 	}
 }
 
+// AddRunSecrets adds the names of variables the run declares as secrets, e.g. in .venomrc. They are merged into every
+// suite's own list of secrets when the files are read.
+func (v *Venom) AddRunSecrets(names []string) {
+	v.runSecrets = append(v.runSecrets, names...)
+}
+
 // RegisterExecutorBuiltin register builtin executors
 func (v *Venom) RegisterExecutorBuiltin(name string, e Executor) {
 	v.executorsBuiltin[name] = e
@@ -111,13 +275,28 @@ func (v *Venom) RegisterExecutorBuiltin(name string, e Executor) {
 
 // RegisterExecutorPlugin register plugin executors
 func (v *Venom) RegisterExecutorPlugin(name string, e Executor) {
+	v.executorsPluginMu.Lock()
+	defer v.executorsPluginMu.Unlock()
 	v.executorsPlugin[name] = e
+}
+
+// lookupExecutorPlugin reads the plugin registry under the read lock. Registration can happen
+// while a run is in progress, so every read of executorsPlugin goes through here.
+func (v *Venom) lookupExecutorPlugin(name string) (Executor, bool) {
+	v.executorsPluginMu.RLock()
+	defer v.executorsPluginMu.RUnlock()
+	ex, ok := v.executorsPlugin[name]
+	return ex, ok
 }
 
 // RegisterExecutorUser registers an user executor
 func (v *Venom) RegisterExecutorUser(name string, e Executor) error {
 	if existing, ok := v.executorsUser[name]; ok {
-		return fmt.Errorf("executor %q already exists (from file %q)", name, existing.(UserExecutor).Filename)
+		filename := "unknown"
+		if ux, ok := existing.(UserExecutor); ok {
+			filename = ux.Filename
+		}
+		return fmt.Errorf("executor %q already exists (from file %q)", name, filename)
 	}
 
 	v.executorsUser[name] = e
@@ -127,63 +306,171 @@ func (v *Venom) RegisterExecutorUser(name string, e Executor) error {
 // GetExecutorRunner initializes a test according to its type
 // if no type is provided, exec is default
 func (v *Venom) GetExecutorRunner(ctx context.Context, ts TestStep, h H) (context.Context, ExecutorRunner, error) {
-	name, _ := ts.StringValue("type")
-	script, _ := ts.StringValue("script")
-	command, _ := ts.StringSliceValue("command")
-	if name == "" && (script != "" || len(command) != 0) {
-		name = "exec"
-	}
-	retry, err := ts.IntValue("retry")
-	if err != nil {
-		return nil, nil, err
-	}
-	retryIf, err := ts.StringSliceValue("retry_if")
-	if err != nil {
-		return nil, nil, err
-	}
-	delay, err := ts.IntValue("delay")
-	if err != nil {
-		return nil, nil, err
-	}
-	timeout, err := ts.IntValue("timeout")
+	s, err := readRunnerSettings(ts)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	info, _ := ts.StringSliceValue("info")
-	vars, err := DumpStringPreserveCase(h)
+	ctx, scope, err := withStepVars(ctx, h)
 	if err != nil {
 		return ctx, nil, err
 	}
+	return v.runnerFor(ctx, s, scope)
+}
 
-	allKeys := []string{}
-	for k, v := range vars {
-		ctx = context.WithValue(ctx, ContextKey("var."+k), v)
-		allKeys = append(allKeys, k)
+// getExecutorRunnerFlat is GetExecutorRunner for a caller that has already flattened the step's variables: the flattened
+// view of scope must be what varsFlattener.flatten gives for the step's scope, and is not modified.
+func (v *Venom) getExecutorRunnerFlat(ctx context.Context, ts TestStep, scope *stepScope) (context.Context, ExecutorRunner, error) {
+	s, err := readRunnerSettings(ts)
+	if err != nil {
+		return nil, nil, err
 	}
-	ctx = context.WithValue(ctx, ContextKey("vars"), allKeys)
+	return v.runnerFor(withStepScope(ctx, scope), s, scope)
+}
 
+// runnerFor resolves the runner of a step from its settings: builtin, user, then plugin.
+func (v *Venom) runnerFor(ctx context.Context, s runnerSettings, scope *stepScope) (context.Context, ExecutorRunner, error) {
+	if s.name == "" {
+		return ctx, s.runner(nil, "builtin"), nil
+	}
+
+	if ex, ok := v.executorsBuiltin[s.name]; ok {
+		return ctx, s.runner(ex, "builtin"), nil
+	}
+
+	if ex, ok := v.executorsUser[s.name]; ok {
+		return ctx, s.runner(ex, "user"), nil
+	}
+
+	// A plugin-typed step re-registers its executor on every step: there is no "already loaded?"
+	// check here, and adding one was considered and rejected in #2023.
+	//
+	// It is cheaper than it looks — plugin.Open caches by path, so the .so is read once and a
+	// repeat call costs about 1.8 µs, measured, with no contention between concurrent files. And
+	// skipping it would change behaviour: registerPlugin resolves <workdir>/lib/<name>.so before
+	// the global lib/<name>.so, so two test files in different directories can each ship their own
+	// plugin under the same name. Caching by name would give the second file the first one's
+	// plugin. Verified with two hello.so variants; see docs/feat/2023/validation.md.
+	workdir, _ := scope.Get("venom.testsuite.workdir")
+	loadErr := v.registerPlugin(ctx, s.name, workdir)
+	if loadErr != nil {
+		Debug(ctx, "executor %q is not implemented as plugin - err:%v", s.name, loadErr)
+	}
+
+	if ex, ok := v.lookupExecutorPlugin(s.name); ok {
+		return ctx, s.runner(ex, "plugin"), nil
+	}
+	err := fmt.Errorf("user executor %q not found - loaded executors are: %v", s.name, reflect.ValueOf(v.executorsUser).MapKeys())
+	if loadErr != nil && pluginFileExists(workdir, s.name) {
+		// RULE-020's message stays as it is when there is no plugin file; a file that exists but cannot be loaded (built
+		// with another Go patch or another venom) says why.
+		err = fmt.Errorf("%w (loading it as a plugin failed: %w)", err, loadErr)
+	}
+	return ctx, nil, err
+}
+
+// runnerSettings are the step keys that configure its runner, whatever the executor.
+type runnerSettings struct {
+	name    string
+	retry   int
+	retryIf []string
+	delay   int
+	timeout int
+	info    []string
+}
+
+// readRunnerSettings reads the executor name and the runner keys of a step.
+func readRunnerSettings(ts TestStep) (runnerSettings, error) {
+	var s runnerSettings
+	var err error
+	if s.name, err = stepExecutorName(ts); err != nil {
+		return s, err
+	}
+	if s.retry, err = ts.IntValue("retry"); err != nil {
+		return s, err
+	}
+	if s.retryIf, err = ts.StringSliceValue("retry_if"); err != nil {
+		return s, err
+	}
+	if s.delay, err = ts.IntValue("delay"); err != nil {
+		return s, err
+	}
+	if s.timeout, err = ts.IntValue("timeout"); err != nil {
+		return s, err
+	}
+	s.info, _ = ts.StringSliceValue("info") //nolint:errcheck // info only feeds report display (newExecutorRunner), no control-flow impact if malformed
+	return s, nil
+}
+
+// stepExecutorName returns the step's type, or exec for an untyped step with a script or a command.
+func stepExecutorName(ts TestStep) (string, error) {
+	name, err := ts.StringValue("type")
+	if err != nil {
+		return "", err
+	}
+	// script and command only matter when inferring exec: a typed step may be a user executor
+	// whose inputs reuse these keys with list or map values.
 	if name == "" {
-		return ctx, newExecutorRunner(nil, name, "builtin", retry, retryIf, delay, timeout, info), nil
+		script, err := ts.StringValue("script")
+		if err != nil {
+			return "", err
+		}
+		command, err := ts.StringSliceValue("command")
+		if err != nil {
+			return "", err
+		}
+		if script != "" || len(command) != 0 {
+			name = "exec"
+		}
 	}
+	return name, nil
+}
 
-	if ex, ok := v.executorsBuiltin[name]; ok {
-		return ctx, newExecutorRunner(ex, name, "builtin", retry, retryIf, delay, timeout, info), nil
-	}
+// runner builds the step's runner around ex, reported as an executor of kind stype.
+func (s runnerSettings) runner(ex Executor, stype string) ExecutorRunner {
+	return newExecutorRunner(ex, s.name, stype, s.retry, s.retryIf, s.delay, s.timeout, s.info)
+}
 
-	if ex, ok := v.executorsUser[name]; ok {
-		return ctx, newExecutorRunner(ex, name, "user", retry, retryIf, delay, timeout, info), nil
+// withStepVars exposes each of h's variables in ctx as "var.<name>", and their names as "vars".
+func withStepVars(ctx context.Context, h H) (context.Context, *stepScope, error) {
+	vars, err := dumpHPreserveCase(h)
+	if err != nil {
+		return ctx, nil, err
 	}
+	scope := newWholeScope(vars, vars)
+	return withStepScope(ctx, scope), scope, nil
+}
 
-	if err := v.registerPlugin(ctx, name, vars); err != nil {
-		Debug(ctx, "executor %q is not implemented as plugin - err:%v", name, err)
-	}
+// withStepScope exposes the flattened variables of scope in ctx. The scope is not copied and must not change while the
+// context is in use.
+func withStepScope(ctx context.Context, scope *stepScope) context.Context {
+	return &stepVarsContext{Context: ctx, scope: scope}
+}
 
-	// then add the executor plugin to the map to not have to load it on each step
-	if ex, ok := v.executorsPlugin[name]; ok {
-		return ctx, newExecutorRunner(ex, name, "plugin", retry, retryIf, delay, timeout, info), nil
+// stepVarsContext answers ContextKey("var.<name>") and ContextKey("vars") from a step's scope, and everything else from
+// its parent. A context.WithValue per variable gave the same answers, but a lookup of any key set before them, a log
+// field such as the test case name, walked a chain as long as the scope, 27 000 links for a large suite (#2465).
+type stepVarsContext struct {
+	context.Context
+	scope *stepScope
+
+	keysOnce sync.Once
+	keys     []string
+}
+
+func (c *stepVarsContext) Value(key interface{}) interface{} {
+	if k, ok := key.(ContextKey); ok {
+		if k == "vars" {
+			c.keysOnce.Do(func() { c.keys = c.scope.Names() })
+			return c.keys
+		}
+		if name, ok := strings.CutPrefix(string(k), "var."); ok {
+			if val, ok := c.scope.Get(name); ok {
+				return val
+			}
+		}
 	}
-	return ctx, nil, fmt.Errorf("user executor %q not found - loaded executors are: %v", name, reflect.ValueOf(v.executorsUser).MapKeys())
+	return c.Context.Value(key)
 }
 
 func (v *Venom) getUserExecutorFilesPath(ctx context.Context, vars map[string]string) []string {
@@ -212,13 +499,13 @@ func (v *Venom) getUserExecutorFilesPath(ctx context.Context, vars map[string]st
 			seen[absRelLib] = struct{}{}
 		}
 	}
-	//use a map to avoid duplicates
+	// use a map to avoid duplicates
 	filepaths := make(map[string]bool)
 
 	for _, p := range libpaths {
 		p = strings.TrimSpace(p)
 
-		err := filepath.Walk(p, func(fp string, f os.FileInfo, err error) error {
+		err := filepath.Walk(p, func(fp string, _ os.FileInfo, _ error) error {
 			switch ext := filepath.Ext(fp); ext {
 			case ".yml", ".yaml":
 				filepaths[fp] = true
@@ -337,15 +624,50 @@ func (v *Venom) registerUserAssertFunc(ctx context.Context, name string) error {
 	return nil
 }
 
-func (v *Venom) registerPlugin(ctx context.Context, name string, vars map[string]string) error {
-	workdir := vars["venom.testsuite.workdir"]
+// validPluginName refuses an executor name that could reach a file outside the lib folders (#2299).
+func validPluginName(name string) error {
+	if name == "" || name == "." || strings.ContainsAny(name, "/\\\x00") || strings.Contains(name, "..") {
+		return fmt.Errorf("unable to load plugin %q: the name must not contain a path", name)
+	}
+	return nil
+}
+
+// pluginCandidates are the two places registerPlugin looks for <name>.so: the test suite's lib folder, then lib/ of the
+// working directory.
+func pluginCandidates(workdir, name string) (suitePath, binPath string) {
+	return path.Join(workdir, "lib", name+".so"), path.Join("lib", name+".so")
+}
+
+// pluginFileExists tells whether a plugin file is there to be loaded, in either place registerPlugin looks.
+func pluginFileExists(workdir, name string) bool {
+	suitePath, binPath := pluginCandidates(workdir, name)
+	return statOK(suitePath) || statOK(binPath)
+}
+
+// statOK tells whether p can be stat-ed: a missing file, or any other error, is false (unlike fileExists, which
+// dereferences the result of a failed stat other than not-exist).
+func statOK(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+func (v *Venom) registerPlugin(_ context.Context, name, workdir string) error {
+	if err := validPluginName(name); err != nil {
+		return err
+	}
 	// try to load from testsuite path
-	p, err := plugin.Open(path.Join(workdir, "lib", name+".so"))
+	suitePath, binPath := pluginCandidates(workdir, name)
+	p, err := plugin.Open(suitePath)
 	if err != nil {
+		suiteErr := err
 		// try to load from venom binary path
-		p, err = plugin.Open(path.Join("lib", name+".so"))
+		p, err = plugin.Open(binPath)
 		if err != nil {
-			return fmt.Errorf("unable to load plugin %q.so", name)
+			// say why the file that is there could not be loaded, not why the one that is not there could not
+			if statOK(suitePath) {
+				err = suiteErr
+			}
+			return fmt.Errorf("unable to load plugin %q.so: %w", name, err)
 		}
 	}
 
@@ -354,7 +676,10 @@ func (v *Venom) registerPlugin(ctx context.Context, name string, vars map[string
 		return err
 	}
 
-	executor := symbolExecutor.(Executor)
+	executor, ok := symbolExecutor.(Executor)
+	if !ok {
+		return fmt.Errorf("plugin %q: Plugin symbol does not implement the Executor interface", name)
+	}
 	v.RegisterExecutorPlugin(name, executor)
 
 	return nil

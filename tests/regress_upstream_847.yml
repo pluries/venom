@@ -1,0 +1,35 @@
+name: Regression upstream 847 - a command output holding a YAML document marker
+testcases:
+- name: ping statistics line
+  steps:
+  - type: exec
+    script: |
+      echo "PING 192.168.11.1: 56 data bytes"
+      echo "--- 192.168.11.1 ping statistics ---"
+      echo "2 packets transmitted"
+    assertions:
+    - result.code ShouldEqual 0
+    - result.systemout ShouldContainSubstring "--- 192.168.11.1 ping statistics ---"
+    vars:
+      stats:
+        from: result.systemout
+        regex: (--- .* ---)
+
+- name: bare document marker line
+  steps:
+  - type: exec
+    script: |
+      echo "a"
+      echo "---"
+      echo "b"
+    assertions:
+    - result.code ShouldEqual 0
+    - result.systemout ShouldContainSubstring ---
+
+- name: the variable is usable by a later step
+  steps:
+  - type: exec
+    script: echo "{{.ping-statistics-line.stats}}"
+    assertions:
+    - result.code ShouldEqual 0
+    - result.systemout ShouldContainSubstring statistics

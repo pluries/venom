@@ -1,0 +1,17 @@
+name: Hello plugin (compiled Go plugin, loaded from lib/hello.so)
+
+# Run it with `make run-test-plugin` in tests/ (also the last step of `make run-test`). The plugin is a build output:
+# `make build-test-plugin` builds it with the same Go toolchain and module versions as venom and copies it to
+# ./plugin/lib/hello.so. Three things make the test mean something:
+# - the suite runs from this directory: YAML executors are looked up in ./lib relative to where venom runs, and
+#   tests/lib/hello.yml (a YAML executor of the same name) would win over the plugin;
+# - it runs with the plain ./venom, not venom.test: the instrumented test binary cannot load a plugin built without
+#   the same instrumentation ("user executor hello not found");
+# - a plugin built on another Go patch must make it fail (plugin was built with a different version of package).
+testcases:
+  - name: the plugin is loaded and runs
+    steps:
+      - type: hello
+        arg: venom
+        assertions:
+          - result.body ShouldEqual "Hello venom"

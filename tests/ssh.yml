@@ -4,7 +4,7 @@ testcases:
   steps:
   - type: ssh
     user: venom
-    host: localhost:2222
+    host: "{{.stackHost}}:2222"
     privatekey: "$HOME/.ssh/id_rsa"
     command: echo foo
     assertions:
@@ -15,7 +15,7 @@ testcases:
   steps:
   - type: ssh
     user: venom
-    host: localhost:2222
+    host: "{{.stackHost}}:2222"
     privatekey: "$HOME/.ssh/id_rsa"
     command: whoami
     sudo: root
@@ -29,7 +29,7 @@ testcases:
   steps:
   - type: ssh
     user: venom
-    host: localhost:2222
+    host: "{{.stackHost}}:2222"
     privatekey: "$HOME/.ssh/id_rsa"
     command: whoami
     sudo: venom

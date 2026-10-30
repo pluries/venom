@@ -28,8 +28,19 @@ func TestRunCmd(t *testing.T) {
 	rootCmd := New()
 	rootCmd.SetArgs(validArgs)
 	venom.IsTest = "test"
-	assert.Equal(t, 3, len(rootCmd.Commands()))
+	assert.Equal(t, 2, len(rootCmd.Commands()))
 	err := rootCmd.Execute()
 	assert.NoError(t, err)
-	rootCmd.Execute()
+	err = rootCmd.Execute()
+	assert.NoError(t, err)
+}
+
+// TestRootHasNoUpdateCommand pins the removal of `venom update` (#2296): the command installed an unverified binary
+// from the upstream project's releases (threat T-19), and this fork has no releases of its own to update from.
+func TestRootHasNoUpdateCommand(t *testing.T) {
+	var names []string
+	for _, c := range New().Commands() {
+		names = append(names, c.Name())
+	}
+	assert.ElementsMatch(t, []string{"run", "version"}, names)
 }

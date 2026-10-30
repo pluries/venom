@@ -1,6 +1,6 @@
 name: RabbitMQ testsuite
 vars:
-  addrs: 'amqp://localhost:5672'
+  addrs: 'amqp://{{.stackHost}}:5672'
   user: guest
   password: guest
   qName: test

@@ -14,7 +14,7 @@ var Cmd = &cobra.Command{
 	Short:   "Display Version of venom: venom version",
 	Long:    `venom version`,
 	Aliases: []string{"v"},
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		fmt.Printf("Version venom: %s\n", venom.Version)
 	},
 }

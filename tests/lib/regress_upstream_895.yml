@@ -1,0 +1,9 @@
+executor: regress_upstream_895
+steps:
+- type: exec
+  script: echo 'P[{{ printf "%s" .testvar }}] Q[{{ .testvar }}]'
+  vars:
+    printed:
+      from: result.systemout
+output:
+  printed: '{{.printed}}'

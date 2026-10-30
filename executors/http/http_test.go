@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 
@@ -132,7 +135,8 @@ func TestCookieRedirect(t *testing.T) {
 	ctx := context.Background()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /set", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /set", func(w http.ResponseWriter, _ *http.Request) {
+		//nolint:gosec // test-only httptest.Server cookie, not production code
 		http.SetCookie(w, &http.Cookie{
 			Name:     "some-cookie",
 			Value:    "some-value",
@@ -182,7 +186,7 @@ func TestResponseHeaders_MultipleValues(t *testing.T) {
 	ctx := context.Background()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /allow", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /allow", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Add("Allow", "GET")
 		w.Header().Add("Allow", "POST")
 		w.Header().Add("Allow", "HEAD")
@@ -205,4 +209,103 @@ func TestResponseHeaders_MultipleValues(t *testing.T) {
 	require.True(t, ok)
 
 	require.Equal(t, "GET, POST, HEAD, OPTIONS", result.Headers["Allow"])
+}
+
+func TestMultipartForm_FileContentType(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "upload-*.pdf")
+	require.NoError(t, err)
+	_, err = tmpFile.WriteString("fixture content")
+	require.NoError(t, err)
+	require.NoError(t, tmpFile.Close())
+
+	cases := []struct {
+		name        string
+		value       string
+		wantContent string
+	}{
+		{
+			name:        "defaults to octet-stream when no type is given",
+			value:       "@" + tmpFile.Name(),
+			wantContent: "application/octet-stream",
+		},
+		{
+			name:        "honors an explicit ;type= override",
+			value:       "@" + tmpFile.Name() + ";type=application/pdf",
+			wantContent: "application/pdf",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &Executor{
+				MultipartForm: map[string]interface{}{
+					"files": tc.value,
+				},
+			}
+			req, err := e.getRequest(context.Background(), "")
+			require.NoError(t, err)
+			defer req.Body.Close()
+
+			_, params, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
+			require.NoError(t, err)
+
+			mr := multipart.NewReader(req.Body, params["boundary"])
+			part, err := mr.NextPart()
+			require.NoError(t, err)
+			require.Equal(t, tc.wantContent, part.Header.Get("Content-Type"))
+			require.Equal(t, filepath.Base(tmpFile.Name()), part.FileName())
+		})
+	}
+}
+
+func TestMultipartForm_RepeatedFileField(t *testing.T) {
+	fileA, err := os.CreateTemp(t.TempDir(), "upload-a-*.txt")
+	require.NoError(t, err)
+	_, err = fileA.WriteString("content a")
+	require.NoError(t, err)
+	require.NoError(t, fileA.Close())
+
+	fileB, err := os.CreateTemp(t.TempDir(), "upload-b-*.md")
+	require.NoError(t, err)
+	_, err = fileB.WriteString("content b")
+	require.NoError(t, err)
+	require.NoError(t, fileB.Close())
+
+	e := &Executor{
+		MultipartForm: map[string]interface{}{
+			"files": []interface{}{
+				"@" + fileA.Name() + ";type=text/plain",
+				"@" + fileB.Name() + ";type=text/markdown",
+			},
+		},
+	}
+	req, err := e.getRequest(context.Background(), "")
+	require.NoError(t, err)
+	defer req.Body.Close()
+
+	_, params, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
+	require.NoError(t, err)
+
+	mr := multipart.NewReader(req.Body, params["boundary"])
+
+	part1, err := mr.NextPart()
+	require.NoError(t, err)
+	require.Equal(t, "files", part1.FormName())
+	require.Equal(t, filepath.Base(fileA.Name()), part1.FileName())
+	require.Equal(t, "text/plain", part1.Header.Get("Content-Type"))
+	body1, err := io.ReadAll(part1)
+	require.NoError(t, err)
+	require.Equal(t, "content a", string(body1))
+
+	part2, err := mr.NextPart()
+	require.NoError(t, err)
+	require.Equal(t, "files", part2.FormName())
+	require.Equal(t, filepath.Base(fileB.Name()), part2.FileName())
+	require.Equal(t, "text/markdown", part2.Header.Get("Content-Type"))
+	body2, err := io.ReadAll(part2)
+	require.NoError(t, err)
+	require.Equal(t, "content b", string(body2))
+
+	_, err = mr.NextPart()
+	require.ErrorIs(t, err, io.EOF)
 }

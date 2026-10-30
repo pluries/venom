@@ -7,19 +7,19 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/ovh/venom/internal/yamljson"
 	"github.com/pkg/errors"
-	"github.com/rockbears/yaml"
 )
 
-func getVarFromPartialYML(ctx context.Context, btesIn []byte) (H, error) {
+func getVarFromPartialYML(_ context.Context, btesIn []byte) (H, error) {
 	btes := readPartialYML(btesIn, "vars")
 	type partialVars struct {
 		Vars H `yaml:"vars" json:"vars"`
 	}
 	var partial partialVars
 	if len(btes) > 0 {
-		if err := yaml.Unmarshal([]byte(btes), &partial); err != nil {
-			Error(context.Background(), "file content: %s", string(btes))
+		if err := yamljson.Unmarshal([]byte(btes), &partial); err != nil {
+			Error(context.Background(), "the vars block is not valid YAML; its content is not logged as it may hold secrets")
 			return nil, errors.Wrapf(err, "error while unmarshal - see venom.log")
 		}
 	}

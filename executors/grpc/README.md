@@ -28,10 +28,10 @@ In your yaml file, you can use:
   - connect_timeout optional: The maximum time, in seconds, to wait for connection to be established. Defaults to 10 seconds
   - default_fields optional: whether json formatter should emit default fields
   - include_text_separator optional: when protobuf string formatter is invoked to format multiple messages, all messages after the first one will be prefixed with character (0x1E)
-  - tls_client_cert optional: a chain of certificates to identify the caller, first certificate in the chain is considered as the leaf, followed by intermediates. Setting it enables mutual TLS authentication. Set the PEM content or the path to the PEM file.
-  - tls_client_key optional: private key corresponding to the certificate. Set the PEM content or the path to the PEM file.
-  - tls_root_ca optional: defines additional root CAs to perform the call. Can contain multiple CAs concatenated together. Set the PEM content or the path to the PEM file.
-  - ignore_verify_ssl optional: set to true if you use a self-signed SSL on remote for example
+  - tls_client_cert optional: a chain of certificates to identify the caller, first certificate in the chain is considered as the leaf, followed by intermediates. Setting it enables mutual TLS authentication, and the certificate is sent even when ignore_verify_ssl is true. Set the PEM content or the path to the PEM file. It needs tls_client_key: a certificate without its key fails the step. It is not used without tls_root_ca: the connection stays plaintext and a warning is logged.
+  - tls_client_key optional: private key corresponding to the certificate. Set the PEM content or the path to the PEM file. It needs tls_client_cert: a key without its certificate fails the step. It is not used without tls_root_ca: the connection stays plaintext and a warning is logged.
+  - tls_root_ca optional: root CAs trusted to verify the server certificate, on top of the system ones. Can contain multiple CAs concatenated together. Set the PEM content or the path to the PEM file. The step uses TLS only when this is set; without it the connection is plaintext.
+  - ignore_verify_ssl optional: set to true to skip the server certificate check, for example a self-signed certificate that tls_root_ca does not cover
 ```
 
 Example:
@@ -69,7 +69,7 @@ testcases:
       -----BEGIN CERTIFICATE-----
       ...
       -----END CERTIFICATE-----
-    ignore_verify_ssl: true # true for self signed certificates
+    # ignore_verify_ssl: true # only when tls_root_ca and the system CAs do not cover the server certificate
     data:
       foo: bar
     service: coolService.api
@@ -102,7 +102,7 @@ testcases:
       -----BEGIN PRIVATE KEY-----
       ...
       -----END PRIVATE KEY-----
-    ignore_verify_ssl: true # true for self signed certificates
+    # ignore_verify_ssl: true # only when tls_root_ca and the system CAs do not cover the server certificate
     data:
       foo: bar
     service: coolService.api

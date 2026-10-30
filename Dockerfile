@@ -1,3 +1,5 @@
+# Runs as root on purpose (SonarQube docker:S6471, accepted as safe by the maintainer, #2810): /workdir/results and /workdir/tests are
+# meant to be bind-mounted, and a non-root user would fail to write to a host folder it does not own.
 FROM alpine:3.24
 
 RUN apk update && \

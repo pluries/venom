@@ -16,6 +16,9 @@ const Name = "hello"
 // Plugin var is mandatory, it's used by venom to register the executor
 var Plugin = Executor{}
 
+// The engine only takes default assertions in the pointer form and ignores any other silently: refuse it at build time.
+var _ interface{ GetDefaultAssertions() *venom.StepAssertions } = Executor{}
+
 // Executor is a venom executor for Hello plugin
 type Executor struct {
 	Arg string `json:"arg,omitempty" yaml:"arg,omitempty"`
@@ -44,6 +47,6 @@ func (e Executor) ZeroValueResult() interface{} {
 }
 
 // GetDefaultAssertions return the default assertions of the executor.
-func (e Executor) GetDefaultAssertions() venom.StepAssertions {
-	return venom.StepAssertions{Assertions: []venom.Assertion{}}
+func (e Executor) GetDefaultAssertions() *venom.StepAssertions {
+	return &venom.StepAssertions{Assertions: []venom.Assertion{}}
 }

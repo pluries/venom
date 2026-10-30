@@ -1,0 +1,9 @@
+executor: regress_3304_executor_actions
+steps:
+- type: exec
+  script: echo 'A[{{ printf "%s" .testvar }}] B[{{ .url | default "x,y" }}]'
+  vars:
+    printed:
+      from: result.systemout
+output:
+  printed: '{{.printed}}'

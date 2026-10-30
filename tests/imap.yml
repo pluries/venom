@@ -1,7 +1,7 @@
 name: IMAP testsuite
 vars:
   withTLS: false
-  imapHost: localhost
+  imapHost: "{{.stackHost}}"
   imapPort: 1143
   imapUser: address@example.org
   imapPassword: pass

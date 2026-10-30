@@ -3,7 +3,7 @@ testcases:
   - name: QPID testcase
     steps:
       - type: amqp
-        addr: amqp://localhost:5673
+        addr: "amqp://{{.stackHost}}:5673"
         clientType: producer
         targetAddr: amqp-test
         messages:
@@ -13,7 +13,7 @@ testcases:
           - '["value5","value6"]'
 
       - type: amqp
-        addr: amqp://localhost:5673
+        addr: "amqp://{{.stackHost}}:5673"
         clientType: consumer
         sourceAddr: amqp-test
         messageLimit: 4

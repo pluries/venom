@@ -176,21 +176,36 @@ OSNAME=$(shell go env GOOS)
 LINT_ARCH = $(shell go env GOARCH)
 CUR_PATH = $(notdir $(shell pwd))
 
-LINT_DIR = $(TMP_DIR)/$(CUR_PATH)/golangci-lint
+LINT_DIR = $(TMP_DIR)/$(CUR_PATH)/golangci-lint-$(LINT_VERSION)
 LINT_BIN = $(LINT_DIR)/golangci-lint
 
-LINT_VERSION=1.31.0
-LINT_CMD = $(LINT_BIN) run --allow-parallel-runners -c .golangci.yml --build-tags $(OSNAME)
+LINT_VERSION=2.14.0
+# The packages to lint. executors/plugins/** is excluded for the same reason it is excluded from a
+# plain `go build ./...`: it needs cgo headers (odbc needs sql.h) and does not compile on a normal
+# checkout. That exclusion is not cosmetic. golangci-lint reports compilation errors *instead of*
+# linter findings, so with the plugins in the set `make lint` printed two typecheck errors and hid
+# the other 278 findings entirely (#2026).
+#
+# Directories, not import paths: golangci-lint resolves each argument as a directory, so an import
+# path yields "directory not found" followed by "0 issues" and exit 0 — a clean-looking run that
+# linted nothing. `mk_go_lint` refuses to run on an empty list for the same reason.
+LINT_PKGS = $(shell go list -f '{{.Dir}}' ./... 2>/dev/null | grep -v '/executors/plugins/')
+# --max-issues-per-linter and --max-same-issues default to 50 and 3 and are not scoped to a single
+# run of the CLI's own summary — they silently drop real findings project-wide, worst on a linter
+# like errcheck whose message text repeats across unrelated call sites (11 findings undercounted to
+# 5 for nolintlint, 36 to 81 for errcheck — #2029). Disabled here so every count `make lint` prints
+# is the true one; the CLI defaults exist for noisy first-time adoption, not for a repo already
+# tracking its backlog by exact count (debt-register.md).
+LINT_CMD = $(LINT_BIN) run --allow-parallel-runners -c .golangci.yml --build-tags $(OSNAME) --max-issues-per-linter 0 --max-same-issues 0 $(LINT_PKGS)
 LINT_ARCHIVE = golangci-lint-$(LINT_VERSION)-$(OSNAME)-$(LINT_ARCH).tar.gz
 LINT_ARCHIVE_DEST = $(TMP_DIR)/$(LINT_ARCHIVE)
 
-# Run this on localc machine.
+# Run this on local machine.
 # It downloads a version of golangci-lint and execute it locally.
-# duration first time ~6s
-# duration second time ~2s
+# The recipe lives in mk_go_lint; this target only wires the prerequisite, so the root Makefile's
+# `lint: mk_go_lint` and this one agree instead of each contributing a command (#2026).
 .PHONY: lint
-lint: $(LINT_BIN)
-	$(LINT_DIR)/$(LINT_CMD)
+lint: mk_go_lint
 
 # install a local golangci-lint if not found.
 $(LINT_BIN):
@@ -205,8 +220,9 @@ $(LINT_BIN):
 	chmod +x $(LINT_BIN)
 	rm -f $(LINT_ARCHIVE_DEST)
 
-mk_go_lint: $(GOLANG_CI_LINT) # run golangci lint
+mk_go_lint: $(LINT_BIN) # run golangci lint
 	$(info *** running lint)
+	@test -n "$(strip $(LINT_PKGS))" || { echo "lint: empty package list — refusing to run, golangci-lint would report 0 issues and exit 0"; exit 1; }
 	$(LINT_CMD)
 
 .PHONY: gofmt

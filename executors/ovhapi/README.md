@@ -27,7 +27,8 @@ The following parameters are available:
 | headers           | Optional                                                         |               |
 | resolve           | Optional                                                         |               |
 | proxy             | Optional                                                         |               |
-| tlsRootCA         | Optional                                                         |               |
+| tlsRootCA         | Optional, see [Private root CA](#private-root-ca)                |               |
+| tls_root_ca       | Optional, another name for `tlsRootCA`                           |               |
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
@@ -57,6 +58,26 @@ vars:
     MIIF3jCCA8agAwIBAgIQAf1tMPyjylGoG7xkDjUDLTANBgkqhkiG9w0BAQwFADCB
     ...
     -----END CERTIFICATE-----
+```
+
+### Private root CA
+
+`tlsRootCA` and `tls_root_ca` are two names for one setting: a CA the executor trusts on top of the system's,
+for an API behind a private certificate. Set one of them; a step that sets both fails before any call.
+The `ovh.tlsRootCA` variable, the one variable for both names, is used only when the step sets neither.
+
+The value is the PEM text of the certificate, or the path of a PEM file. A relative path is read from the
+folder of the test suite. The `ovh.tlsRootCA` variable takes a path too.
+
+The root CA only serves TLS connections. With an `http://` endpoint the step logs a warning; a redirect to
+`https://` or an `https://` proxy still uses the CA. An endpoint name such as `ovh-eu` is an `https://` URL and does not warn.
+
+```yaml
+- type: ovhapi
+  endpoint: 'https://api.example.internal/1.0'
+  tls_root_ca: certs/internal-ca.pem
+  noAuth: true
+  path: /me
 ```
 
 ## Example of an __ovhapi__ TestSuite

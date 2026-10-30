@@ -1,0 +1,6 @@
+# Default host of the test stack (`make start-test-stack` publishes its ports there). The suites write
+# {{.stackHost}}, never localhost: the nightly runs them from a Jenkins agent that reaches the stack by vm1's
+# address (venom #2121), with --var stackHost=<address>. A suite cannot default it itself: venom resolves a
+# suite's own vars before the command line's.
+variables:
+  - stackHost=localhost

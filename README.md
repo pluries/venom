@@ -26,6 +26,7 @@ Venom is a CLI (Command Line Interface) that aims to create, manage and run your
   - [Arguments](#arguments)
     - [Define arguments with environment variables](#define-arguments-with-environment-variables)
   - [Use a configuration file](#use-a-configuration-file)
+  - [Trust model](#trust-model)
 - [Concepts](#concepts)
   - [TestSuites](#testsuites)
   - [Executors](#executors)
@@ -84,25 +85,13 @@ $ venom -h
 
 # Updating
 
-You can update to the latest version with `venom update` command:
+This fork has no `venom update` command. The upstream command downloaded the latest release of the upstream project
+without checking a checksum or signature (#2296). This fork publishes no release binaries: it tags releases (`v1.0.0`) and you build from the tag.
 
-```bash
-$ venom update
-```
-
-The `venom update` command will download the latest version and replace the current binary:
-
-```bash
-Url to update venom: https://github.com/ovh/venom/releases/download/v1.2.0/venom.darwin-amd64
-Getting latest release from: https://github.com/ovh/venom/releases/download/v1.2.0/venom.darwin-amd64 ...
-Update done.
-```
-
-Check the new version with `venom version` command:
+To update, build the new version (`go build ./cmd/venom`), then check the version:
 
 ```bash
 $ venom version
-Version venom: v1.2.0 
 ```
 
 # Docker image
@@ -132,7 +121,6 @@ Usage:
 Available Commands:
   help        Help about any command
   run         Run Tests
-  update      Update venom to the latest release version: venom update
   version     Display Version of venom: venom version
 
 Flags:
@@ -170,7 +158,9 @@ Flags:
       --html-report             Generate HTML Report
       --lib-dir string          Lib Directory: can contain user executors. example:/etc/venom/lib:$HOME/venom.d/lib
       --output-dir string       Output Directory: create tests results file inside this directory
+      --parallel int            Number of test files to run at the same time. 1 (default) runs them one after another (default 1)
       --stop-on-failure         Stop running Test Suite on first Test Case failure
+      --strict-variables        Fail a step that names an unknown variable
       --var stringArray         --var cds='cds -f config.json' --var cds2='cds -f config.json'
       --var-from-file strings   --var-from-file filename.yaml --var-from-file filename2.yaml: yaml, must contains a dictionary
   -v, --verbose count           verbose. -v (INFO level in venom.log file), -vv to very verbose (DEBUG level) and -vvv to very verbose with CPU Profiling
@@ -186,6 +176,52 @@ If you want to sort many testsuite files, you can use standard commands, example
 ```bash
 venom run `find . -type f -name "*.yml"|sort`
 ```
+
+## Run several test files at the same time
+
+By default `venom` runs one test file at a time. `--parallel N` runs up to `N` of them at once:
+
+```bash
+$ venom run --parallel 4
+```
+
+Integration tests spend most of their time waiting on other systems, and that wait is what this
+shares out. On eight files that each wait, measured: **3.4× faster at `--parallel 4`, 5.6× at
+`--parallel 8`**.
+
+The unit is the **file**: the test cases inside a file, and the steps inside a case, still run one
+after another, because a step passes its values to the next one. Running a single file with
+`--parallel 4` therefore changes nothing.
+
+**How much you gain depends on whether your files actually wait.** About 0.35 s of every run is
+fixed — starting up, parsing, writing the reports — and no worker count removes it. On venom's own
+`tests/` suites, which are short and mostly do not wait, `--parallel 4` is only about 1.2× faster.
+Expect a real gain when your files sit waiting on a service, and little when they do not.
+
+Two things to know:
+
+- **Every console line is tagged with the file it came from**, so the output of files running at
+  the same time can still be read:
+
+  ```
+  [exec.yml]   • exec testsuite (tests/exec.yml)
+  [vars.yml]   • vars testsuite (tests/vars.yml)
+  [exec.yml]   	• stdin PASS
+  [vars.yml]   	• set PASS
+  ```
+
+  Lines from different files do interleave — they are not grouped — but each one says who wrote it,
+  and a line is never split between two files. Follow a single file with `grep`:
+  `venom run --parallel 4 | grep '^\[exec.yml'`. With `--parallel 1` there is no tag at all and the
+  output is exactly what it has always been. The log file is unaffected either way: every line
+  there is already tagged with its test file.
+- **`--stop-on-failure` stops the whole run.** When a test file fails, no further file is started;
+  the files already running are left to finish, so every file that started still reports a result.
+  Files that never started are reported as skipped. In earlier versions this flag only skipped the
+  remaining test cases of the file that failed, and the run continued with the next file.
+
+`-vvv` cannot be combined with `--parallel 2` or more: CPU profiling is process-wide, so it cannot
+produce one profile per file running at the same time. The run stops at startup and says so.
 
 ## Globstar support
 
@@ -245,7 +281,9 @@ Flags:
       --html-report             Generate HTML Report
       --lib-dir string          Lib Directory: can contain user executors. example:/etc/venom/lib:$HOME/venom.d/lib
       --output-dir string       Output Directory: create tests results file inside this directory
+      --parallel int            Number of test files to run at the same time. 1 (default) runs them one after another (default 1)
       --stop-on-failure         Stop running Test Suite on first Test Case failure
+      --strict-variables        Fail a step that names an unknown variable
       --var stringArray         --var cds='cds -f config.json' --var cds2='cds -f config.json'
       --var-from-file strings   --var-from-file filename.yaml --var-from-file filename2.yaml: yaml, must contains a dictionary
   -v, --verbose count           verbose. -vv to very verbose and -vvv to very verbose with CPU Profiling
@@ -269,8 +307,10 @@ Flags and their equivalent with environment variables usage:
 - `--lib-dir="/etc/venom/lib:$HOME/venom.d/lib"` flag is equivalent to `VENOM_LIB_DIR="/etc/venom/lib"` environment variable
 - `--output-dir="test-results"` flag is equivalent to `VENOM_OUTPUT_DIR="test-results"` environment variable
 - `--stop-on-failure` flag is equivalent to `VENOM_STOP_ON_FAILURE=true` environment variable
+- `--strict-variables` flag is equivalent to `VENOM_STRICT_VARIABLES=true` environment variable
 - `--var foo=bar` flag is equivalent to `VENOM_VAR_foo='bar'` environment variable
 - `--var-from-file fileA.yml fileB.yml` flag is equivalent to `VENOM_VAR_FROM_FILE="fileA.yml fileB.yml"` environment variable
+- `--parallel 4` flag is equivalent to `VENOM_PARALLEL=4` environment variable
 - `-v` flag is equivalent to `VENOM_VERBOSE=1` environment variable
 - `-vv` flag is equivalent to `VENOM_VERBOSE=2` environment variable
 
@@ -286,13 +326,26 @@ variables:
 variables_files:
   - my_var_file.yaml
 stop_on_failure: true
+strict_variables: true
 format: xml
 output_dir: output
 lib_dir: lib
 verbosity: 3
+parallel: 4
 ```
 
 Please note that the command line flags override the configuration file. The configuration file overrides the environment variables.
+
+## Trust model
+
+Venom has no sandbox. A test suite is code, and it runs with the rights of the user who runs venom.
+
+- Test suites, user executors in `lib/` and Go plugins (`lib/*.so`) all run with your rights. Only run a suite you would run as a script.
+- Never put a step's result, or any value you do not control, into a `script:` or into SQL text without quoting it. A step result can contain anything, and venom does not escape it for a shell or for SQL.
+- In CI, do not run suites from unreviewed forks or pull requests, and do not make secrets available to such runs.
+- A secret declared in `secrets` or in `.venomrc` is hidden in reports, logs and the console. Only the declared values are hidden.
+- The `ssh`, `imap` and `smtp` executors do not check the server's identity by default. Venom logs a warning once per run when that is the case. To turn the check on, set `knownhosts` or `hostkey` on an `ssh` step, and `verifytls: true` (under `auth:` for `imap`) together with `withtls: true` on an `imap` or `smtp` step.
+- The `web` executor ignores HTTPS certificate errors by default. Set the `verifyTls` variable to `true` to make the browser reject an invalid certificate. See [executors/web](executors/web/README.md).
 
 
 # Concepts
@@ -352,6 +405,35 @@ testcases:
 
 ```
 
+### HTTP multipart form
+
+`multipart_form` sends the request body as `multipart/form-data`. It cannot be combined with `body` or `bodyFile`. See the [HTTP executor](https://github.com/ovh/venom/tree/master/executors/http) for the full field list.
+
+Each key is a form field. A value is either a single string, or a list of strings
+to send the same field name once per item (e.g. a repeated `files` part for a multi-file upload).
+
+A value starting with `@` is the path of a file to upload, resolved from the current
+working directory. Append `;type=<content-type>` to set the Content-Type of that part;
+it defaults to `application/octet-stream`. This mirrors curl's `-F field=@path;type=...`.
+
+```yaml
+- name: upload files
+  steps:
+  - type: http
+    method: POST
+    url: https://httpbin.org/post
+    multipart_form:
+      description: "a plain text field"
+      tags:
+        - "first"
+        - "second"
+      files:
+        - "@./testdata/report.pdf;type=application/pdf"
+        - "@./testdata/notes.txt;type=text/plain"
+    assertions:
+    - result.statuscode ShouldEqual 200
+```
+
 ## Executors
 
 * **amqp**: https://github.com/ovh/venom/tree/master/executors/amqp
@@ -362,6 +444,9 @@ testcases:
 * **http**: https://github.com/ovh/venom/tree/master/executors/http
 * **imap**: https://github.com/ovh/venom/tree/master/executors/imap
 * **kafka** https://github.com/ovh/venom/tree/master/executors/kafka
+* **mcp**: https://github.com/ovh/venom/tree/master/executors/mcp
+* **mobile**: https://github.com/ovh/venom/tree/master/executors/mobile
+* **mongo**: https://github.com/ovh/venom/tree/master/executors/mongo
 * **mqtt** https://github.com/ovh/venom/tree/master/executors/mqtt
 * **odbc**: https://github.com/ovh/venom/tree/master/executors/plugins/odbc
 * **ovhapi**: https://github.com/ovh/venom/tree/master/executors/ovhapi
@@ -372,6 +457,9 @@ testcases:
 * **sql**: https://github.com/ovh/venom/tree/master/executors/sql
 * **ssh**: https://github.com/ovh/venom/tree/master/executors/ssh
 * **web**: https://github.com/ovh/venom/tree/master/executors/web
+
+`odbc` and your own `lib/*.so` executors are Go plugins: they only load into the exact venom and Go version they were
+built with, so rebuild them after every upgrade (see [executors/plugins](executors/plugins/README.md)).
 
 ### User defined executors
 
@@ -418,6 +506,8 @@ Notice the variable `alljson`. All variables declared in output are automaticall
 
 Venom will load user-defined executors from the directory `lib/` relative to the testsuite path. You can add executor source paths using the flag `--lib-dir`. 
 Note that all folders listed with `--lib-dir` will be scanned recursively to find `.yml` files as user executors.
+
+A retry does not recover a user executor step from a failure of one of its inner steps. With `retry: 2` on a step that uses a user executor, an inner step that fails on the first attempt keeps the step failed, even if every later attempt passes (with or without a `timeout`). A built-in executor behaves differently: only the last attempt decides. To retry something flaky, put `retry` on the inner step inside the user executor, or use a built-in executor for it.
 
 The user defined executors work with templating, you can check the templating result in `venom.log`. In this file, if you see an error such as `error converting YAML to JSON: yaml: line 14: found unexpected end of stream`, you probably need to adjust indentation with the templating function `indent`. 
 
@@ -501,6 +591,31 @@ Each user variable used in testsuite must be declared in this section. You can o
 - As environment variables.
 
 
+
+### Fail a step on an unknown variable
+
+By default, venom leaves a `{{.name}}` it does not know as written in the step, so a misspelt variable such as
+`{{.nmae}}` is sent as text and the test can pass. With `--strict-variables`, a step that names an unknown variable
+fails before it runs, and the message names the step and the variable:
+
+```
+step #2: unknown variable(s) "nmae"
+```
+
+The setting is off by default and applies to the whole run. Set it with `--strict-variables`,
+`VENOM_STRICT_VARIABLES=true`, or `strict_variables: true` in `.venomrc`.
+
+These are never reported: variables set by an earlier step or by `vars`, range variables (`key`, `value`, `index`),
+`venom.*` variables, expressions that use `default` or `ternary`, and `{{.result...}}` (venom resolves those after the
+step has run, in `info`, assertions and extracted variables). Unknown helper names are not checked.
+
+One limit: venom first reads the whole file and evaluates every expression made only of letters, digits, `.`, `-`, `_`,
+`"`, `|` and spaces at the step level. An expression with any other character, such as `{{ printf "%s" .a }}` or
+`{{.url | trimSuffix "/"}}`, is evaluated when the file is read, before the steps run, so strict mode does not see it
+and a misspelt variable in it still gives an empty or wrong value without an error.
+
+A step that needs the text `{{.something}}` to reach another tool unchanged, such as `docker ... --format '{{.ID}}'`,
+fails in strict mode. Venom has no escape for literal double braces, so leave the setting off for such a suite.
 
 ### Variable helpers
 
@@ -627,6 +742,24 @@ testcases:
 
 The value `this-value-is-secret` will not be printed in your console, `venom.log` and `...dump.json` files.
 
+#### What is hidden, and what is not
+
+Venom hides a secret by its value, wherever the run would print or write it: console, `venom.log`, the reports and the `...dump.json` files, in step output, names, assertion texts and error messages.
+
+Hidden:
+
+- every value declared in `secrets:` (suite) or in `secrets` of `.venomrc`;
+- the base64 form of that value, and for `basic_auth_password` the base64 of `user:password`;
+- the slug form venom gives it inside a test case name (only when it is at least 4 characters long);
+- the URL-encoded forms: query (`a+b%21`) and path (`a%20b%21`), when they differ from the value and are at least 4 characters long.
+
+Not hidden:
+
+- a value you did not declare, even when it came from a secret source;
+- any other transformation: hex, HTML entities, a hash, a signature, a value cut into pieces or joined with other text, a JSON-escaped form.
+
+When a step can print a secret in another form, avoid printing it, or declare the transformed value in `secrets:` as well.
+
 ## Assertions
 
 ### Keywords
@@ -661,6 +794,8 @@ The value `this-value-is-secret` will not be printed in your console, `venom.log
 * ShouldNotBeIn - [example](https://github.com/ovh/venom/tree/master/tests/assertions/ShouldNotBeIn.yml)
 * ShouldBeEmpty - [example](https://github.com/ovh/venom/tree/master/tests/assertions/ShouldBeEmpty.yml)
 * ShouldNotBeEmpty - [example](https://github.com/ovh/venom/tree/master/tests/assertions/ShouldNotBeEmpty.yml)
+* ShouldBeArray - [example](https://github.com/ovh/venom/tree/master/tests/assertions/ShouldBeArray.yml)
+* ShouldBeMap - [example](https://github.com/ovh/venom/tree/master/tests/assertions/ShouldBeMap.yml)
 * ShouldHaveLength - [example](https://github.com/ovh/venom/tree/master/tests/assertions/ShouldHaveLength.yml)
 * ShouldStartWith - [example](https://github.com/ovh/venom/tree/master/tests/assertions/ShouldStartWith.yml)
 * ShouldNotStartWith - [example](https://github.com/ovh/venom/tree/master/tests/assertions/ShouldNotStartWith.yml)
@@ -828,7 +963,11 @@ There are two ways to debug a testsuite:
  - use `-v` flag on venom binary.
    - `$ venom run -v test.yml` will output details for each step
    - `$ venom run -vv test.yml` will generate *dump.json* files for each teststep.
-   - `$ venom run -vvv test.yml` will generate *pprof* files for CPU profiling.
+   - `$ venom run -vvv test.yml` will generate *pprof* files, one CPU and one memory profile per
+     test file, named `pprof_cpu_profile_<file>.prof` and `pprof_mem_profile_<file>.prof` in the
+     output directory. Open them with `go tool pprof`. Profiling is per file so you can see which
+     suite is slow, which is why `-vvv` cannot be combined with `--parallel 2` or more: Go's CPU
+     profiler is process-wide.
  - use `info` keyword in your teststep:
 `test.yml` file:
 ```yml
@@ -1051,6 +1190,10 @@ Run integration tests:
 ```bash
 make run-test
 ```
+
+Run the suites from `tests/`: the suites reach the stack through `{{.stackHost}}`, whose default (`localhost`) is
+in `tests/.venomrc`, and venom reads that file from the current directory. To run them against a stack on another
+machine, pass its address: `make start-test-stack STACK_HOST=<address>` and `make run-test STACK_HOST=<address>`.
 
 Cleanup:
 

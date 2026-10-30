@@ -1,5 +1,5 @@
-  kafkaHost: 'localhost'
+  kafkaHost: '{{.stackHost}}'
   kafkaPort: '9092'
   kafkaUser: ''
   kafkaPwd: ''
-  kafkaSchemaRegistryHost: 'localhost:8081'
+  kafkaSchemaRegistryHost: '{{.stackHost}}:18081'

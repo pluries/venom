@@ -149,13 +149,22 @@ func (e Executor) consumeMessages(ctx context.Context, session *amqp.Session) (i
 	return output, nil
 }
 
-func consumeMessage(ctx context.Context, recv *amqp.Receiver) (msgString string, msgJSON interface{}, err error) {
+// messageReceiver is what consumeMessage needs from an AMQP receiver;
+// *amqp.Receiver satisfies it and a test can stand in with a fake.
+type messageReceiver interface {
+	Receive(ctx context.Context, opts *amqp.ReceiveOptions) (*amqp.Message, error)
+	AcceptMessage(ctx context.Context, msg *amqp.Message) error
+}
+
+var _ messageReceiver = (*amqp.Receiver)(nil)
+
+func consumeMessage(ctx context.Context, recv messageReceiver) (msgString string, msgJSON interface{}, err error) {
 	msg, err := recv.Receive(ctx, nil)
 	if err != nil {
 		return "", nil, fmt.Errorf("consuming message: %w", err)
 	}
 
-	if err = recv.AcceptMessage(context.TODO(), msg); err != nil {
+	if err = recv.AcceptMessage(ctx, msg); err != nil {
 		return "", nil, fmt.Errorf("consuming message: %w", err)
 	}
 

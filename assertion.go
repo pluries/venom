@@ -45,7 +45,15 @@ func applyAssertions(ctx context.Context, r interface{}, tc TestCase, stepNumber
 		sa = *defaultAssertions
 	}
 
-	executorResult := GetExecutorResult(r)
+	executorResult, err := getExecutorResult(r)
+	if err != nil {
+		return AssertionsApplied{
+			OK:        false,
+			errors:    []Failure{{Value: RemoveNotPrintableChar(fmt.Sprintf("unable to dump executor result: %s", err))}},
+			systemout: systemout,
+			systemerr: systemerr,
+		}
+	}
 
 	isOK := true
 	assertions := []AssertionApplied{}
@@ -87,7 +95,7 @@ type assertion struct {
 	Required bool
 }
 
-func parseAssertions(ctx context.Context, s string, input interface{}) (*assertion, error) {
+func parseAssertions(_ context.Context, s string, input interface{}) (*assertion, error) {
 	dump, err := Dump(input)
 	if err != nil {
 		return nil, errors.New("assertion syntax error")
@@ -130,9 +138,9 @@ func check(ctx context.Context, tc TestCase, stepNumber int, rangedIndex int, as
 	var errs *Failure
 	switch t := assertion.(type) {
 	case string:
-		errs = checkString(ctx, tc, stepNumber, rangedIndex, assertionIndex, assertion.(string), r)
+		errs = checkString(ctx, tc, stepNumber, rangedIndex, assertionIndex, t, r)
 	case map[string]interface{}:
-		errs = checkBranch(ctx, tc, stepNumber, rangedIndex, assertionIndex, assertion.(map[string]interface{}), r)
+		errs = checkBranch(ctx, tc, stepNumber, rangedIndex, assertionIndex, t, r)
 	default:
 		errs = newFailure(ctx, tc, stepNumber, rangedIndex, assertionIndex, "", fmt.Errorf("unsupported assertion format: %v", t))
 	}
@@ -142,30 +150,43 @@ func check(ctx context.Context, tc TestCase, stepNumber int, rangedIndex int, as
 // checkString evaluate a complex assertion containing logical operators
 // it recursively calls checkAssertion for each operand
 func checkBranch(ctx context.Context, tc TestCase, stepNumber int, rangedIndex int, assertionIndex int, branch map[string]interface{}, r interface{}) *Failure {
-	// Extract logical operator
+	operator, operands, err := branchOperands(branch)
+	if err != nil {
+		return newFailure(ctx, tc, stepNumber, rangedIndex, assertionIndex, "", err)
+	}
+	// An empty branch passes before its operator is validated.
+	if len(operands) == 0 {
+		return nil
+	}
+
+	assertionsSuccess, results := evaluateOperands(ctx, tc, stepNumber, rangedIndex, assertionIndex, operands, r)
+	if err := operatorVerdict(operator, assertionsSuccess, len(operands), results); err != nil {
+		return newFailure(ctx, tc, stepNumber, rangedIndex, assertionIndex, "", err)
+	}
+	return nil
+}
+
+// branchOperands extracts the single logical operator of a branch and its operands.
+func branchOperands(branch map[string]interface{}) (string, []interface{}, error) {
 	if len(branch) != 1 {
-		return newFailure(ctx, tc, stepNumber, rangedIndex, assertionIndex, "", fmt.Errorf("expected exactly 1 logical operator but %d were provided", len(branch)))
+		return "", nil, fmt.Errorf("expected exactly 1 logical operator but %d were provided", len(branch))
 	}
 	var operator string
 	for k := range branch {
 		operator = k
 	}
 
-	// Extract logical operands
-	var operands []interface{}
 	switch t := branch[operator].(type) {
 	case []interface{}:
-		operands = branch[operator].([]interface{})
+		return operator, t, nil
 	default:
-		return newFailure(ctx, tc, stepNumber, rangedIndex, assertionIndex, "", fmt.Errorf("expected %s operands to be an []interface{}, got %v", operator, t))
+		return "", nil, fmt.Errorf("expected %s operands to be an []interface{}, got %v", operator, t)
 	}
-	if len(operands) == 0 {
-		return nil
-	}
+}
 
-	// Evaluate assertions (operands)
+// evaluateOperands checks each operand and returns the number that passed with one report line per operand.
+func evaluateOperands(ctx context.Context, tc TestCase, stepNumber int, rangedIndex int, assertionIndex int, operands []interface{}, r interface{}) (int, []string) {
 	var results []string
-	assertionsCount := len(operands)
 	assertionsSuccess := 0
 	for _, assertion := range operands {
 		errs := check(ctx, tc, stepNumber, rangedIndex, assertionIndex, assertion, r)
@@ -177,34 +198,38 @@ func checkBranch(ctx context.Context, tc TestCase, stepNumber int, rangedIndex i
 			results = append(results, fmt.Sprintf("  - pass: %s", assertion))
 		}
 	}
+	return assertionsSuccess, results
+}
 
-	// Evaluate operator behaviour
-	var err error
+// operatorVerdict applies the logical operator to the operands' outcome.
+func operatorVerdict(operator string, assertionsSuccess int, assertionsCount int, results []string) error {
 	switch operator {
 	case "and":
 		if assertionsSuccess != assertionsCount {
-			err = fmt.Errorf("%d/%d assertions succeeded:\n%s\n", assertionsSuccess, assertionsCount, strings.Join(results, "\n"))
+			return fmt.Errorf("%d/%d assertions succeeded:\n%s\n", //nolint:revive,staticcheck // user-visible assertion report text; changing it is a behaviour change
+				assertionsSuccess, assertionsCount, strings.Join(results, "\n"))
 		}
 	case "or":
 		if assertionsSuccess == 0 {
-			err = fmt.Errorf("no assertions succeeded:\n%s\n", strings.Join(results, "\n"))
+			return fmt.Errorf("no assertions succeeded:\n%s\n", //nolint:revive,staticcheck // user-visible assertion report text; changing it is a behaviour change
+				strings.Join(results, "\n"))
 		}
 	case "xor":
 		if assertionsSuccess == 0 {
-			err = fmt.Errorf("no assertions succeeded:\n%s\n", strings.Join(results, "\n"))
+			return fmt.Errorf("no assertions succeeded:\n%s\n", //nolint:revive,staticcheck // user-visible assertion report text; changing it is a behaviour change
+				strings.Join(results, "\n"))
 		}
 		if assertionsSuccess > 1 {
-			err = fmt.Errorf("multiple assertions succeeded but expected only one to succeed:\n%s\n", strings.Join(results, "\n"))
+			return fmt.Errorf("multiple assertions succeeded but expected only one to succeed:\n%s\n", //nolint:revive,staticcheck // user-visible assertion report text; changing it is a behaviour change
+				strings.Join(results, "\n"))
 		}
 	case "not":
 		if assertionsSuccess > 0 {
-			err = fmt.Errorf("some assertions succeeded but expected none to succeed:\n%s\n", strings.Join(results, "\n"))
+			return fmt.Errorf("some assertions succeeded but expected none to succeed:\n%s\n", //nolint:revive,staticcheck // user-visible assertion report text; changing it is a behaviour change
+				strings.Join(results, "\n"))
 		}
 	default:
-		return newFailure(ctx, tc, stepNumber, rangedIndex, assertionIndex, "", fmt.Errorf("unsupported assertion operator %s", operator))
-	}
-	if err != nil {
-		return newFailure(ctx, tc, stepNumber, rangedIndex, assertionIndex, "", err)
+		return fmt.Errorf("unsupported assertion operator %s", operator)
 	}
 	return nil
 }
@@ -253,7 +278,7 @@ func splitAssertion(a string) []string {
 	return m
 }
 
-func stringToType(val string, valType interface{}) (interface{}, error) {
+func stringToType(val string, valType interface{}) (interface{}, error) { //nolint:gocyclo // flat type switch, one parse call per type; a closure table would read worse and hide each return type
 	switch valType.(type) {
 	case bool:
 		return strconv.ParseBool(val)

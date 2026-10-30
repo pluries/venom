@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"unicode"
 
 	util "github.com/aokoli/goutils"
 	"github.com/huandu/xstrings"
@@ -31,7 +32,7 @@ func init() {
 		"trim":       strings.TrimSpace,
 		"upper":      strings.ToUpper,
 		"lower":      strings.ToLower,
-		"title":      strings.Title,
+		"title":      title,
 		"untitle":    untitle,
 		"substr":     substring,
 		// Switch order so that "foo" | repeat 5
@@ -69,7 +70,7 @@ func init() {
 		"escape":       escape,
 		"stringQuote":  stringQuote,
 		"add": func(i ...interface{}) int64 {
-			var a int64 = 0
+			var a int64
 			for _, b := range i {
 				a += toInt64(b)
 			}
@@ -79,16 +80,16 @@ func init() {
 		"mul": func(a interface{}, v ...interface{}) int64 {
 			val := toInt64(a)
 			for _, b := range v {
-				val = val * toInt64(b)
+				val *= toInt64(b)
 			}
 			return val
 		},
 		"div":       func(a, b interface{}) int64 { return toInt64(a) / toInt64(b) },
 		"mod":       func(a, b interface{}) int64 { return toInt64(a) % toInt64(b) },
 		"ternary":   ternary,
-		"urlencode": func(s string) string { return url.QueryEscape(s) },
-		"dirname":   func(s string) string { return path.Dir(s) },
-		"basename":  func(s string) string { return path.Base(s) },
+		"urlencode": url.QueryEscape,
+		"dirname":   path.Dir,
+		"basename":  path.Base,
 	})
 }
 
@@ -111,47 +112,61 @@ func wrapHelpers(fs template.FuncMap) template.FuncMap {
 		}
 
 		// create the wrapper func
-		wrappedHelpers[key] = func(ps ...interface{}) interface{} {
-			// if the helper func need more params than ps length, throw an error
+		wrappedHelpers[key] = func(ps ...interface{}) (interface{}, error) {
+			// if the helper func need more params than ps length, return an error: text/template reports it
 			if len(ps) < paramsCount {
-				// panic will be catched be text/template executor
-				panic(fmt.Sprintf("missing params (expected: %s)", strings.Join(paramsTypes, ", ")))
+				return nil, fmt.Errorf("missing params (expected: %s)", strings.Join(paramsTypes, ", "))
 			}
 
 			// for all helper's params, forward values from wrapper
 			values := make([]reflect.Value, len(ps))
-			for i := 0; i < len(ps); i++ {
-				if value, ok := ps[i].(*val); ok {
-					// if the value is a pointer to val, we should return its internal value
-					values[i] = reflect.ValueOf((*value)["_"])
-				} else if value, ok := ps[i].(val); ok {
-					// if the value is a val, we should return its internal value
-					values[i] = reflect.ValueOf(value["_"])
-				} else if v := reflect.ValueOf(ps[i]); v.IsValid() {
-					// for all params that are not val (string, integer...) use it directly
-					values[i] = v
-				} else {
-					// if the value is not valid (means that given value is nil with unknown type), convert to nil void pointer
-					var v *void
-					values[i] = reflect.ValueOf(v)
-				}
+			for i := range ps {
+				values[i] = helperParam(ps[i])
 			}
 
-			results := helperV.Call(values)
-			if len(results) == 0 {
-				return nil
-			}
-
-			return results[0].Interface()
+			return helperResult(helperV.Call(values))
 		}
 	}
 	return wrappedHelpers
 }
 
+// helperParam unwraps one argument of a wrapped helper.
+func helperParam(p interface{}) reflect.Value {
+	if value, ok := p.(*val); ok {
+		// if the value is a pointer to val, we should return its internal value
+		return reflect.ValueOf((*value)["_"])
+	}
+	if value, ok := p.(val); ok {
+		// if the value is a val, we should return its internal value
+		return reflect.ValueOf(value["_"])
+	}
+	if v := reflect.ValueOf(p); v.IsValid() {
+		// for all params that are not val (string, integer...) use it directly
+		return v
+	}
+	// if the value is not valid (means that given value is nil with unknown type), convert to nil void pointer
+	var v *void
+	return reflect.ValueOf(v)
+}
+
+// helperResult is what a wrapped helper hands to text/template: its first result and, for a helper that returns
+// (value, error), the error when it is set.
+func helperResult(results []reflect.Value) (interface{}, error) {
+	if len(results) == 0 {
+		return nil, nil
+	}
+	if len(results) > 1 {
+		if err, ok := results[1].Interface().(error); ok && err != nil {
+			return nil, err
+		}
+	}
+	return results[0].Interface(), nil
+}
+
 // Switch order so that "$foo" | trimall "$"
 func dfault(valfault ...interface{}) string {
 	var castToString = func(i interface{}) string {
-		s, _ := i.(string)
+		s, _ := i.(string) //nolint:errcheck // soft cast: a non-string input is meant to fall back to the zero value (""), not an error
 		return s
 	}
 
@@ -183,7 +198,7 @@ func empty(given interface{}) bool {
 	case reflect.Array, reflect.Slice, reflect.Map, reflect.String:
 		return g.Len() == 0
 	case reflect.Bool:
-		return g.Bool() == false
+		return !g.Bool()
 	case reflect.Complex64, reflect.Complex128:
 		return g.Complex() == 0
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
@@ -210,14 +225,17 @@ func coalesce(v ...interface{}) interface{} {
 }
 
 // toJSON encodes an item into a JSON string
+// toJSON encodes an item into a JSON string. v always comes from already-templated/decoded YAML
+// data (string, number, bool, map, slice), which json.Marshal always encodes successfully; on
+// failure this degrades to an empty string, same as upstream sprig.
 func toJSON(v interface{}) string {
-	output, _ := json.Marshal(v)
+	output, _ := json.Marshal(v) //nolint:errcheck // v is YAML-decoded data, always marshals
 	return string(output)
 }
 
-// toPrettyJSON encodes an item into a pretty (indented) JSON string
+// toPrettyJSON encodes an item into a pretty (indented) JSON string. Same guarantee as toJSON.
 func toPrettyJSON(v interface{}) string {
-	output, _ := json.MarshalIndent(v, "", "  ")
+	output, _ := json.MarshalIndent(v, "", "  ") //nolint:errcheck // v is YAML-decoded data, always marshals
 	return string(output)
 }
 
@@ -237,7 +255,9 @@ func abbrev(width int, s string) string {
 	if width < 4 {
 		return s
 	}
-	r, _ := util.Abbreviate(s, width)
+	// util.Abbreviate(s, width) is AbbreviateFull(s, 0, width); AbbreviateFull's only error case is
+	// maxWidth < 4, already excluded by the guard above.
+	r, _ := util.Abbreviate(s, width) //nolint:errcheck // width>=4 here (guarded above), the only error case of the underlying AbbreviateFull
 	return r
 }
 
@@ -245,7 +265,8 @@ func abbrevboth(left, right int, s string) string {
 	if right < 4 || left > 0 && right < 7 {
 		return s
 	}
-	r, _ := util.AbbreviateFull(s, left, right)
+	// AbbreviateFull's only error case is maxWidth (right) < 4, already excluded by the guard above.
+	r, _ := util.AbbreviateFull(s, left, right) //nolint:errcheck // right>=4 here (guarded above), the only error case of AbbreviateFull
 	return r
 }
 func initials(s string) string {
@@ -253,29 +274,77 @@ func initials(s string) string {
 	return util.Initials(s)
 }
 
-func randAlphaNumeric(count int) string {
-	// It is not possible, it appears, to actually generate an error here.
-	r, _ := util.RandomAlphaNumeric(count)
-	return r
+// randAlphaNumeric, randAlpha, randASCII and randNumeric return a failure from the underlying util.Random* call:
+// text/template turns the error of a template function into the Execute error. util.RandomSeed errors when
+// count < 0, which a template author can pass (e.g. `{{ randAlphaNum -5 }}`).
+
+func randAlphaNumeric(count int) (string, error) {
+	r, err := util.RandomAlphaNumeric(count)
+	if err != nil {
+		return "", fmt.Errorf("randAlphaNumeric: %w", err)
+	}
+	return r, nil
 }
 
-func randAlpha(count int) string {
-	r, _ := util.RandomAlphabetic(count)
-	return r
+func randAlpha(count int) (string, error) {
+	r, err := util.RandomAlphabetic(count)
+	if err != nil {
+		return "", fmt.Errorf("randAlpha: %w", err)
+	}
+	return r, nil
 }
 
-func randASCII(count int) string {
-	r, _ := util.RandomAscii(count)
-	return r
+func randASCII(count int) (string, error) {
+	r, err := util.RandomAscii(count)
+	if err != nil {
+		return "", fmt.Errorf("randASCII: %w", err)
+	}
+	return r, nil
 }
 
-func randNumeric(count int) string {
-	r, _ := util.RandomNumeric(count)
-	return r
+func randNumeric(count int) (string, error) {
+	r, err := util.RandomNumeric(count)
+	if err != nil {
+		return "", fmt.Errorf("randNumeric: %w", err)
+	}
+	return r, nil
 }
 
 func untitle(str string) string {
 	return util.Uncapitalize(str)
+}
+
+// title reproduces strings.Title's exact word-boundary rule (deprecated since Go 1.18, SA1019 —
+// #2028), so the "title" template helper's behaviour does not change for existing suites: any
+// character that is not an ASCII letter/digit/underscore, or a Unicode letter/digit, or is a Unicode
+// space, starts a new word, and the first rune of each word is title-cased. golang.org/x/text/cases
+// is the maintained, Unicode-correct replacement stdlib recommends, but adopting it changes output
+// for non-ASCII input and adds a new dependency — out of scope for a lint fix; both stay open under
+// the migration filed alongside the deprecated protobuf libraries (see grpc.go).
+func title(s string) string {
+	prev := ' '
+	return strings.Map(func(r rune) rune {
+		if isWordSeparator(prev) {
+			prev = r
+			return unicode.ToTitle(r)
+		}
+		prev = r
+		return r
+	}, s)
+}
+
+func isWordSeparator(r rune) bool {
+	if r <= 0x7F {
+		switch {
+		case '0' <= r && r <= '9', 'a' <= r && r <= 'z', 'A' <= r && r <= 'Z', r == '_':
+			return false
+		}
+		return true
+	}
+	if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		return false
+	}
+	return unicode.IsSpace(r)
 }
 
 func quote(str ...interface{}) string {
@@ -296,15 +365,15 @@ func squote(str ...interface{}) string {
 
 func indent(spaces int, v string) string {
 	pad := strings.Repeat(" ", spaces)
-	return pad + strings.Replace(v, "\n", "\n"+pad, -1)
+	return pad + strings.ReplaceAll(v, "\n", "\n"+pad)
 }
 
 func nindent(spaces int, v string) string {
 	return "\n" + indent(spaces, v)
 }
 
-func replace(old, new, src string) string {
-	return strings.Replace(src, old, new, -1)
+func replace(old, newStr, src string) string {
+	return strings.ReplaceAll(src, old, newStr)
 }
 
 func plural(one, many string, count int) string {
@@ -312,33 +381,6 @@ func plural(one, many string, count int) string {
 		return one
 	}
 	return many
-}
-
-func strslice(v interface{}) []string {
-	switch v := v.(type) {
-	case []string:
-		return v
-	case []interface{}:
-		l := len(v)
-		b := make([]string, l)
-		for i := 0; i < l; i++ {
-			b[i] = strval(v[i])
-		}
-		return b
-	default:
-		val := reflect.ValueOf(v)
-		switch val.Kind() {
-		case reflect.Array, reflect.Slice:
-			l := val.Len()
-			b := make([]string, l)
-			for i := 0; i < l; i++ {
-				b[i] = strval(val.Index(i).Interface())
-			}
-			return b
-		default:
-			return []string{strval(v)}
-		}
-	}
 }
 
 func strval(v interface{}) string {
@@ -381,9 +423,9 @@ func substring(start, length int, s string) string {
 }
 
 func escape(s string) string {
-	s1 := strings.Replace(s, "_", "-", -1)
-	s1 = strings.Replace(s1, "/", "-", -1)
-	s1 = strings.Replace(s1, ".", "-", -1)
+	s1 := strings.ReplaceAll(s, "_", "-")
+	s1 = strings.ReplaceAll(s1, "/", "-")
+	s1 = strings.ReplaceAll(s1, ".", "-")
 	return s1
 }
 

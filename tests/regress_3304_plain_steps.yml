@@ -1,0 +1,39 @@
+name: Regression 3304 - plain steps keep their behaviour (default, printf in info, template variables)
+vars:
+  known_url: http://x:1
+testcases:
+- name: default with an undefined variable
+  steps:
+  - type: exec
+    script: echo 'U[{{ .url | default "http://localhost:8080" }}]'
+    assertions:
+    - result.systemout ShouldContainSubstring U[http://localhost:8080]
+
+- name: default with a defined variable
+  steps:
+  - type: exec
+    script: echo 'U[{{ .known_url | default "http://localhost:8080" }}]'
+    assertions:
+    - result.systemout ShouldContainSubstring U[http://x:1]
+
+- name: default holding a comma
+  steps:
+  - type: exec
+    script: echo 'C[{{ .c | default "a,b" }}]'
+    assertions:
+    - result.systemout ShouldContainSubstring C[a,b]
+
+- name: template variable spanning two actions
+  steps:
+  - type: exec
+    script: echo 'D[{{ $x := .nope }}{{ $x }}]'
+    assertions:
+    - result.code ShouldEqual 0
+
+- name: printf of a result in info
+  steps:
+  - type: exec
+    script: echo hi
+    info: '{{ printf "%s" .result.systemout }}'
+    assertions:
+    - result.code ShouldEqual 0

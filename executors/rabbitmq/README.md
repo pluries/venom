@@ -41,6 +41,14 @@ In your yaml file, you can use:
 
 ```
 
+## Output
+
+The result of a subscriber step has `messages`, `bodyjson` and `headers` (see the examples). Each message in
+`result.messages.messagesN` also carries `Acknowledger`, which is the AMQP library's own channel struct
+(`github.com/rabbitmq/amqp091-go`). Treat `result.messages.messagesN.Acknowledger.*` as internal and unstable: its keys
+and the number of fields it reports change with the library (they changed when venom moved from `streadway/amqp` to
+`amqp091-go`, for example `__Len__` went from 21 to 28). Do not write assertions on it.
+
 ## Examples:
 
 ### Publisher (workQ)

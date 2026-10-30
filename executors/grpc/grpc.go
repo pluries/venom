@@ -3,27 +3,23 @@ package grpc
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/fullstorydev/grpcurl"
-	"github.com/golang/protobuf/proto"
-	"github.com/jhump/protoreflect/desc"
+	"github.com/jhump/protoreflect/desc" //nolint:staticcheck // grpcurl.InvocationEventHandler takes *desc.MethodDescriptor; remove when grpcurl moves to protobuf-go (#2035)
 	"github.com/jhump/protoreflect/grpcreflect"
 	"github.com/mitchellh/mapstructure"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/runtime/protoiface"
 
 	"github.com/ovh/venom"
+	"github.com/ovh/venom/executors/internal/tlsconfig"
 )
 
 // Name for test exec
@@ -48,6 +44,13 @@ type Executor struct {
 	TLSClientKey         string                 `json:"tls_client_key" yaml:"tls_client_key" mapstructure:"tls_client_key"`
 	TLSRootCA            string                 `json:"tls_root_ca" yaml:"tls_root_ca" mapstructure:"tls_root_ca"`
 	IgnoreVerifySSL      bool                   `json:"ignore_verify_ssl" yaml:"ignore_verify_ssl" mapstructure:"ignore_verify_ssl"`
+
+	// The three fields below take the snake_case keys the README documents (default_fields, include_text_separator,
+	// connect_timeout), which the Go field names above do not reach; either spelling sets the option (#2038). They are
+	// decoded only: the json and yaml names belong to the fields above.
+	JSONDefaultFieldsSnake    bool   `json:"-" yaml:"-" mapstructure:"default_fields"`
+	IncludeTextSeparatorSnake bool   `json:"-" yaml:"-" mapstructure:"include_text_separator"`
+	ConnectTimeoutSnake       *int64 `json:"-" yaml:"-" mapstructure:"connect_timeout"`
 }
 
 // Result represents a step result
@@ -69,16 +72,16 @@ type customHandler struct {
 }
 
 // OnResolveMethod is called with a descriptor of the method that is being invoked.
-func (*customHandler) OnResolveMethod(m *desc.MethodDescriptor) {}
+func (*customHandler) OnResolveMethod(_ *desc.MethodDescriptor) {}
 
 // OnSendHeaders is called with the request metadata that is being sent.
 func (*customHandler) OnSendHeaders(metadata.MD) {}
 
 // OnReceiveHeaders is called when response headers have been received.
-func (*customHandler) OnReceiveHeaders(m metadata.MD) {}
+func (*customHandler) OnReceiveHeaders(_ metadata.MD) {}
 
 // OnReceiveResponse is called for each response message received.
-func (c *customHandler) OnReceiveResponse(msg proto.Message) {
+func (c *customHandler) OnReceiveResponse(msg protoiface.MessageV1) {
 	res, err := c.formatter(msg)
 	if err != nil || c.err != nil {
 		c.err = err
@@ -88,7 +91,7 @@ func (c *customHandler) OnReceiveResponse(msg proto.Message) {
 }
 
 // OnReceiveTrailers is called when response trailers and final RPC status have been received.
-func (c *customHandler) OnReceiveTrailers(stat *status.Status, met metadata.MD) {
+func (c *customHandler) OnReceiveTrailers(stat *status.Status, _ metadata.MD) {
 	if err := stat.Err(); err != nil {
 		c.target.Systemerr = err.Error()
 
@@ -126,11 +129,7 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 		return nil, err
 	}
 
-	// prepare headers
-	headers := make([]string, len(e.Headers))
-	for k, v := range e.Headers {
-		headers = append(headers, fmt.Sprintf("%s: %s", k, v))
-	}
+	headers := requestHeaders(e.Headers)
 
 	// prepare data
 	data, err := json.Marshal(e.Data)
@@ -141,102 +140,12 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 	result := Result{}
 	start := time.Now()
 
-	// prepare dial function
-	dial := func() (*grpc.ClientConn, error) {
-		dialTime := 10 * time.Second
-		if e.ConnectTimeout != nil && *e.ConnectTimeout > 0 {
-			dialTime = time.Duration(*e.ConnectTimeout * int64(time.Second))
-		}
-		ctx, cancel := context.WithTimeout(ctx, dialTime)
-		defer cancel()
-
-		var creds credentials.TransportCredentials
-
-		workdir := venom.StringVarFromCtx(ctx, "venom.testsuite.workdir")
-
-		// connect to a TLS server
-		if e.TLSRootCA != "" {
-			TLSRootCAFilepath := e.TLSRootCA
-			if !filepath.IsAbs(e.TLSRootCA) {
-				TLSRootCAFilepath = filepath.Join(workdir, e.TLSRootCA)
-			}
-			var TLSRootCA []byte
-			if _, err := os.Stat(TLSRootCAFilepath); err == nil {
-				TLSRootCA, err = os.ReadFile(TLSRootCAFilepath)
-				if err != nil {
-					return nil, fmt.Errorf("unable to read TLSRootCA from file %s", TLSRootCAFilepath)
-				}
-			} else {
-				TLSRootCA = []byte(e.TLSRootCA)
-			}
-
-			certPool := x509.NewCertPool()
-			if ok := certPool.AppendCertsFromPEM(TLSRootCA); !ok {
-				return nil, errors.New("failed to add root CA's certificate")
-			}
-			creds = credentials.NewTLS(&tls.Config{
-				ClientCAs:          certPool,
-				InsecureSkipVerify: e.IgnoreVerifySSL,
-			})
-
-			// connect to a mutual TLS server
-			var TLSClientCert, TLSClientKey []byte
-			if e.TLSClientCert != "" {
-				TLSClientCertFilepath := e.TLSClientCert
-				if !filepath.IsAbs(e.TLSClientCert) {
-					TLSClientCertFilepath = filepath.Join(workdir, e.TLSClientCert)
-				}
-				if _, err := os.Stat(TLSClientCertFilepath); err == nil {
-					TLSClientCert, err = os.ReadFile(TLSClientCertFilepath)
-					if err != nil {
-						return nil, fmt.Errorf("unable to read TLSClientCert from file %s", TLSClientCertFilepath)
-					}
-				} else {
-					TLSClientCert = []byte(e.TLSClientCert)
-				}
-			}
-
-			if e.TLSClientKey != "" {
-				TLSClientKeyFilepath := e.TLSClientKey
-				if !filepath.IsAbs(e.TLSClientKey) {
-					TLSClientKeyFilepath = filepath.Join(workdir, e.TLSClientKey)
-				}
-				if _, err := os.Stat(TLSClientKeyFilepath); err == nil {
-					TLSClientKey, err = os.ReadFile(TLSClientKeyFilepath)
-					if err != nil {
-						return nil, fmt.Errorf("unable to read TLSClientKey from file %s", TLSClientKeyFilepath)
-					}
-				} else {
-					TLSClientKey = []byte(e.TLSClientKey)
-				}
-			}
-
-			if len(TLSClientCert) > 0 && len(TLSClientKey) > 0 {
-				cert, err := tls.X509KeyPair(TLSClientCert, TLSClientKey)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse x509 mTLS certificate or key: %s", err)
-				}
-				creds = credentials.NewTLS(&tls.Config{
-					ClientCAs:          certPool,
-					InsecureSkipVerify: e.IgnoreVerifySSL,
-					Certificates:       []tls.Certificate{cert},
-				})
-			}
-		}
-
-		cc, err := grpcurl.BlockingDial(ctx, "tcp", e.URL, creds)
-		if err != nil {
-			return nil, fmt.Errorf("failed to dial grpc: %w", err)
-		}
-		return cc, nil
-	}
-
 	var cc *grpc.ClientConn
 	var descSource grpcurl.DescriptorSource
 	var refClient *grpcreflect.Client
 	md := grpcurl.MetadataFromHeaders(headers)
 	refCtx := metadata.NewOutgoingContext(ctx, md)
-	cc, err = dial()
+	cc, err = e.dial(ctx)
 	if err != nil {
 		return Result{Err: err.Error()}, fmt.Errorf("grpc dial error: %w", err)
 	}
@@ -260,8 +169,8 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 	rf, formatter, err := grpcurl.RequestParserAndFormatterFor(
 		grpcurl.FormatJSON,
 		descSource,
-		e.JSONDefaultFields,
-		e.IncludeTextSeparator,
+		e.JSONDefaultFields || e.JSONDefaultFieldsSnake,
+		e.IncludeTextSeparator || e.IncludeTextSeparatorSnake,
 		in,
 	)
 	if err != nil {
@@ -288,27 +197,94 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 		result.Err = handle.err.Error()
 	}
 
-	// parse stdout as JSON
-	var outJSONArray []interface{}
-	if err := venom.JSONUnmarshal([]byte(result.Systemout), &outJSONArray); err != nil {
-		outJSONMap := map[string]interface{}{}
-		if err2 := venom.JSONUnmarshal([]byte(result.Systemout), &outJSONMap); err2 == nil {
-			result.SystemoutJSON = outJSONMap
-		}
-	} else {
-		result.SystemoutJSON = outJSONArray
-	}
-
-	// parse stderr output as JSON
-	var errJSONArray []interface{}
-	if err := venom.JSONUnmarshal([]byte(result.Systemerr), &errJSONArray); err != nil {
-		errJSONMap := map[string]interface{}{}
-		if err2 := venom.JSONUnmarshal([]byte(result.Systemerr), &errJSONMap); err2 == nil {
-			result.SystemerrJSON = errJSONMap
-		}
-	} else {
-		result.SystemerrJSON = errJSONArray
-	}
+	result.SystemoutJSON = parseOutputJSON(result.Systemout)
+	result.SystemerrJSON = parseOutputJSON(result.Systemerr)
 
 	return result, nil
+}
+
+// requestHeaders turns the step's headers into grpcurl's "name: value" form. The slice starts with
+// len(h) empty entries before the appended ones, as it always has.
+func requestHeaders(h map[string]string) []string {
+	headers := make([]string, len(h))
+	for k, v := range h {
+		headers = append(headers, fmt.Sprintf("%s: %s", k, v))
+	}
+	return headers
+}
+
+// dialTimeout is connect_timeout in seconds when positive, else 10 seconds.
+func (e Executor) dialTimeout() time.Duration {
+	seconds := e.ConnectTimeout
+	if seconds == nil {
+		seconds = e.ConnectTimeoutSnake
+	}
+	if seconds != nil && *seconds > 0 {
+		return time.Duration(*seconds * int64(time.Second))
+	}
+	return 10 * time.Second
+}
+
+// dial connects to e.URL within the dial timeout, over TLS when a root CA is set.
+func (e Executor) dial(ctx context.Context) (*grpc.ClientConn, error) {
+	ctx, cancel := context.WithTimeout(ctx, e.dialTimeout())
+	defer cancel()
+
+	workdir := venom.StringVarFromCtx(ctx, "venom.testsuite.workdir")
+
+	creds, err := e.transportCredentials(ctx, workdir)
+	if err != nil {
+		return nil, err
+	}
+
+	cc, err := grpcurl.BlockingDial(ctx, "tcp", e.URL, creds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial grpc: %w", err)
+	}
+	return cc, nil
+}
+
+// warnf is venom.Warning; a test replaces it.
+var warnf = venom.Warning
+
+// transportCredentials returns nil (plaintext) without a root CA, TLS credentials with one, and mutual TLS credentials
+// when a client certificate and key are set as well; one without the other is an error. The configuration comes from
+// the shared tlsconfig package (ADR-0009): the root CA is trusted on top of the system pool, and the client
+// certificate is sent even when ignore_verify_ssl skips the server check. A client pair set without a root CA is not
+// used: the call stays plaintext, as it always was, and a warning says so; half a pair fails in every case.
+func (e Executor) transportCredentials(ctx context.Context, workdir string) (credentials.TransportCredentials, error) {
+	if err := tlsconfig.CheckClientPair(e.TLSClientCert, e.TLSClientKey); err != nil {
+		return nil, err
+	}
+	if e.TLSRootCA == "" {
+		if e.TLSClientCert != "" {
+			warnf(ctx, "grpc: tls_client_cert and tls_client_key are not used without tls_root_ca: the connection is plaintext")
+		}
+		return nil, nil
+	}
+
+	cfg, err := tlsconfig.New(ctx, tlsconfig.Settings{
+		Workdir:            workdir,
+		RootCA:             e.TLSRootCA,
+		ClientCert:         e.TLSClientCert,
+		ClientKey:          e.TLSClientKey,
+		InsecureSkipVerify: e.IgnoreVerifySSL,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return credentials.NewTLS(cfg), nil
+}
+
+// parseOutputJSON decodes s as a JSON array, else as a JSON object, else returns nil.
+func parseOutputJSON(s string) interface{} {
+	var outJSONArray []interface{}
+	if err := venom.JSONUnmarshal([]byte(s), &outJSONArray); err == nil {
+		return outJSONArray
+	}
+	outJSONMap := map[string]interface{}{}
+	if err := venom.JSONUnmarshal([]byte(s), &outJSONMap); err == nil {
+		return outJSONMap
+	}
+	return nil
 }

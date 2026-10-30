@@ -60,7 +60,13 @@ type Result struct {
 }
 
 // Run execute TestStep
-func (e *Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, error) {
+//
+// The receiver is deliberately a value, like every other builtin executor's: venom registers one
+// executor instance per name for the whole process and hands that same instance to every step, so
+// a pointer receiver would let two test files running at once (--parallel, #2020) overwrite each
+// other's dsn, credentials and bucket cache. Working on a copy keeps each step independent.
+// Pinned by TestExecutorIsSafeForConcurrentSteps.
+func (e Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, error) {
 	e.SetDefaults()
 
 	if err := mapstructure.Decode(step, &e); err != nil {
@@ -79,59 +85,41 @@ func (e *Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, e
 	results := make([]any, len(e.Actions))
 
 	for index, action := range e.Actions {
-		actionType := fmt.Sprintf("%v", action["type"])
-
-		switch actionType {
-		case "touch":
-			results[index], err = e.doTouch(ctx, action, cluster)
-			if err != nil {
-				return nil, err
-			}
-
-		case "exists":
-			results[index], err = e.doExists(ctx, action, cluster)
-			if err != nil {
-				return nil, err
-			}
-
-		case "delete":
-			results[index], err = e.doDelete(ctx, action, cluster)
-			if err != nil {
-				return nil, err
-			}
-
-		case "get":
-			results[index], err = e.doGet(ctx, action, cluster)
-			if err != nil {
-				return nil, err
-			}
-
-		case "upsert":
-			results[index], err = e.doUpsert(ctx, action, cluster)
-			if err != nil {
-				return nil, err
-			}
-
-		case "insert":
-			results[index], err = e.doInsert(ctx, action, cluster)
-			if err != nil {
-				return nil, err
-			}
-
-		case "replace":
-			results[index], err = e.doReplace(ctx, action, cluster)
-			if err != nil {
-				return nil, err
-			}
-
-		default:
-			return nil, fmt.Errorf("action type %q not supported", actionType)
+		results[index], err = e.doAction(ctx, action, cluster)
+		if err != nil {
+			return nil, err
 		}
 	}
 
 	return Result{
 		Actions: results,
 	}, nil
+}
+
+// doAction dispatches one action to the function of its type. The receiver is a pointer on
+// purpose: it is Run's own copy of the executor, and the bucket cache the actions fill must stay
+// on that copy.
+func (e *Executor) doAction(ctx context.Context, action map[string]any, cluster *gocb.Cluster) (any, error) {
+	actionType := fmt.Sprintf("%v", action["type"])
+
+	switch actionType {
+	case "touch":
+		return e.doTouch(ctx, action, cluster)
+	case "exists":
+		return e.doExists(ctx, action, cluster)
+	case "delete":
+		return e.doDelete(ctx, action, cluster)
+	case "get":
+		return e.doGet(ctx, action, cluster)
+	case "upsert":
+		return e.doUpsert(ctx, action, cluster)
+	case "insert":
+		return e.doInsert(ctx, action, cluster)
+	case "replace":
+		return e.doReplace(ctx, action, cluster)
+	default:
+		return nil, fmt.Errorf("action type %q not supported", actionType)
+	}
 }
 
 func (e *Executor) clearCache() {
@@ -176,7 +164,9 @@ func (e *Executor) getCluster(ctx context.Context) (*gocb.Cluster, error) {
 	if e.ProfileWanDevelopment {
 		venom.Debug(ctx, "will connect to cluster using config profile wan development")
 
-		opts.ApplyProfile(gocb.ClusterConfigProfileWanDevelopment)
+		if err := opts.ApplyProfile(gocb.ClusterConfigProfileWanDevelopment); err != nil {
+			return nil, fmt.Errorf("unable to apply couchbase config profile: %w", err)
+		}
 	}
 
 	cluster, err := gocb.Connect(e.DSN, opts)
@@ -419,12 +409,6 @@ func (e *Executor) tryGetExpiry(actionExpiry *float64) (time.Duration, bool) {
 	return time.Duration(0), false
 }
 
-func (e *Executor) getExpiry(actionExpiry *float64) time.Duration {
-	expiry, _ := e.tryGetExpiry(actionExpiry)
-
-	return expiry
-}
-
 func (e *Executor) doGet(ctx context.Context,
 	rawAction any,
 	cluster *gocb.Cluster,
@@ -461,11 +445,12 @@ func (e *Executor) doGet(ctx context.Context,
 			docOut, err = collection.Get(id, opts)
 		}
 
-		if errors.Is(err, gocb.ErrDocumentNotFound) {
+		switch {
+		case errors.Is(err, gocb.ErrDocumentNotFound):
 			found = false
-		} else if err != nil {
+		case err != nil:
 			return nil, err
-		} else {
+		default:
 			if terr := docOut.Content(&data); terr != nil {
 				return nil, fmt.Errorf("error while transcoding content of entry id=%q: %w", id, terr)
 			}

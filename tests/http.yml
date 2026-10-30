@@ -101,7 +101,7 @@ testcases:
   steps:
   - type: http
     method: GET
-    url: http://localhost:9280/get
+    url: "http://{{.stackHost}}:9280/get"
     query_parameters:
       a: " b"
     assertions:

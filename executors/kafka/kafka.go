@@ -16,6 +16,7 @@ import (
 	"github.com/mitchellh/mapstructure"
 
 	"github.com/ovh/venom"
+	"github.com/ovh/venom/executors/internal/tlsconfig"
 )
 
 const (
@@ -63,6 +64,16 @@ type (
 
 		// TLS Config
 		InsecureTLS bool `json:"insecure_tls,omitempty" yaml:"insecure_tls,omitempty"`
+		// WithTLSSnake and InsecureTLSSnake take the snake_case keys the README documents (with_tls, insecure_tls), which
+		// the Go field names above do not reach; either spelling turns its switch on (#2370). They are decoded only: their
+		// json and yaml names belong to WithTLS and InsecureTLS.
+		WithTLSSnake     bool `json:"-" yaml:"-" mapstructure:"with_tls"`
+		InsecureTLSSnake bool `json:"-" yaml:"-" mapstructure:"insecure_tls"`
+		// TLSRootCA, TLSClientCert and TLSClientKey are inline PEM or a path relative to the suite (ADR-0009). They are
+		// used only when TLS is on.
+		TLSRootCA     string `json:"tls_root_ca" yaml:"tls_root_ca" mapstructure:"tls_root_ca"`
+		TLSClientCert string `json:"tls_client_cert" yaml:"tls_client_cert" mapstructure:"tls_client_cert"`
+		TLSClientKey  string `json:"tls_client_key" yaml:"tls_client_key" mapstructure:"tls_client_key"`
 
 		// ClientType must be "consumer" or "producer"
 		ClientType string `json:"client_type,omitempty" yaml:"clientType,omitempty"`
@@ -96,6 +107,9 @@ type (
 
 		// Kafka version, default is 0.10.2.0
 		KafkaVersion string `json:"kafka_version,omitempty" yaml:"kafka_version,omitempty"`
+		// KafkaVersionSnake takes the snake_case key the README documents (kafka_version), which the Go field name above does
+		// not reach; either spelling sets the version (#3303). It is decoded only: its json and yaml names belong to KafkaVersion.
+		KafkaVersionSnake string `json:"-" yaml:"-" mapstructure:"kafka_version"`
 
 		schemaReg SchemaRegistry
 	}
@@ -107,7 +121,6 @@ type (
 		MessagesJSON []interface{} `json:"messagesjson,omitempty" yaml:"messagesJSON,omitempty"`
 		Err          string        `json:"err" yaml:"error"`
 	}
-	consumeFunc = func(message *sarama.ConsumerMessage) (Message, interface{}, error)
 )
 
 // ZeroValueResult return an empty implementation of this executor result
@@ -147,7 +160,7 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 	switch e.ClientType {
 	case "producer":
 		workdir := venom.StringVarFromCtx(ctx, "venom.testsuite.workdir")
-		err := e.produceMessages(workdir)
+		err := e.produceMessages(ctx, workdir)
 		if err != nil {
 			result.Err = err.Error()
 		}
@@ -167,12 +180,12 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 	return result, nil
 }
 
-func (e Executor) produceMessages(workdir string) error {
+func (e Executor) produceMessages(ctx context.Context, workdir string) error {
 	if len(e.Messages) == 0 && e.MessagesFile == "" {
-		return fmt.Errorf("Either one of `messages` or `messagesFile` field must be set")
+		return fmt.Errorf("either one of `messages` or `messagesFile` field must be set")
 	}
 
-	config, err := e.getKafkaConfig()
+	config, err := e.getKafkaConfig(ctx)
 	if err != nil {
 		return err
 	}
@@ -187,31 +200,30 @@ func (e Executor) produceMessages(workdir string) error {
 	}
 	defer sp.Close()
 
-	messages := []*sarama.ProducerMessage{}
+	messages, err := e.producerMessages(workdir)
+	if err != nil {
+		return err
+	}
+	return sp.SendMessages(messages)
+}
 
+// producerMessages returns the messages to send: those of messages_file (read under workdir) when it is set, else
+// messages.
+func (e Executor) producerMessages(workdir string) ([]*sarama.ProducerMessage, error) {
 	if e.MessagesFile != "" {
-		path := filepath.Join(workdir, e.MessagesFile)
-		if _, err = os.Stat(path); err == nil {
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			messages := []Message{}
-			err = venom.JSONUnmarshal(content, &messages)
-			if err != nil {
-				return err
-			}
-			e.Messages = messages
-		} else {
-			return err
+		fileMessages, err := readMessagesFile(filepath.Join(workdir, e.MessagesFile))
+		if err != nil {
+			return nil, err
 		}
+		e.Messages = fileMessages
 	}
 
+	messages := []*sarama.ProducerMessage{}
 	for i := range e.Messages {
 		message := e.Messages[i]
 		value, err := e.getMessageValue(&message, workdir)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		messages = append(messages, &sarama.ProducerMessage{
 			Topic:   message.Topic,
@@ -220,8 +232,23 @@ func (e Executor) produceMessages(workdir string) error {
 			Value:   sarama.ByteEncoder(value),
 		})
 	}
+	return messages, nil
+}
 
-	return sp.SendMessages(messages)
+// readMessagesFile returns the JSON array of messages in the file at path.
+func readMessagesFile(path string) ([]Message, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	messages := []Message{}
+	if err := venom.JSONUnmarshal(content, &messages); err != nil {
+		return nil, err
+	}
+	return messages, nil
 }
 
 func (e Executor) getMessageValue(m *Message, workdir string) ([]byte, error) {
@@ -263,7 +290,7 @@ func (e Executor) getMessageValue(m *Message, workdir string) ([]byte, error) {
 	}
 
 	// 2. Encode Value with schema
-	avroMsg, err := Convert2Avro(value, string(schema))
+	avroMsg, err := Convert2Avro(value, schema)
 	if err != nil {
 		return nil, fmt.Errorf("can't convert value 2 avro with schema: %w", err)
 	}
@@ -292,40 +319,26 @@ func (e Executor) getRAWMessageValue(m *Message, workdir string) ([]byte, error)
 
 func (e Executor) consumeMessages(ctx context.Context) ([]Message, []interface{}, error) {
 	if len(e.Topics) == 0 {
-		return nil, nil, fmt.Errorf("You must provide topics")
+		return nil, nil, fmt.Errorf("you must provide topics")
 	}
 
-	config, err := e.getKafkaConfig()
+	consumerGroup, err := e.newConsumerGroup(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	if strings.TrimSpace(e.InitialOffset) == "oldest" {
-		config.Consumer.Offsets.Initial = sarama.OffsetOldest
-	}
-
-	consumerGroup, err := sarama.NewConsumerGroup(e.Addrs, e.GroupID, config)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error instantiate consumer err: %w", err)
-	}
 	defer func() { _ = consumerGroup.Close() }()
 
-	timeout := time.Duration(e.Timeout) * time.Second
-	if e.WaitFor > 0 {
-		timeout = time.Duration(e.WaitFor) * time.Second
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	return e.consume(ctx, consumerGroup)
+}
+
+// consume reads from the group until the message limit, the timeout or an error, whichever comes first. The caller
+// closes the group.
+func (e Executor) consume(ctx context.Context, consumerGroup sarama.ConsumerGroup) ([]Message, []interface{}, error) {
+	ctx, cancel := context.WithTimeout(ctx, e.consumeTimeout())
 	defer cancel()
 
 	// Track errors
-	go func() {
-		for err := range consumerGroup.Errors() {
-			if e.WaitFor > 0 && errors.Is(err, context.DeadlineExceeded) {
-				continue
-			}
-
-			venom.Error(ctx, "error on consume:%s", err)
-		}
-	}()
+	go e.logConsumeErrors(ctx, consumerGroup)
 
 	h := &handler{
 		withAVRO:     e.WithAVRO,
@@ -338,18 +351,67 @@ func (e Executor) consumeMessages(ctx context.Context) ([]Message, []interface{}
 		done:         make(chan struct{}),
 	}
 
-	cherr := make(chan error)
+	// Buffered: after the context ends, waitConsumed no longer receives and the goroutine must still be able to exit.
+	cherr := make(chan error, 1)
 	go func() {
 		cherr <- consumerGroup.Consume(ctx, e.Topics, h)
 	}()
 
+	if err := e.waitConsumed(ctx, cherr); err != nil {
+		return nil, nil, err
+	}
+
+	return h.messages, h.messagesJSON, nil
+}
+
+// newConsumerGroup builds the client configuration, starting from the oldest offset when asked.
+func (e Executor) newConsumerGroup(ctx context.Context) (sarama.ConsumerGroup, error) {
+	config, err := e.getKafkaConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(e.InitialOffset) == "oldest" {
+		config.Consumer.Offsets.Initial = sarama.OffsetOldest
+	}
+
+	consumerGroup, err := sarama.NewConsumerGroup(e.Addrs, e.GroupID, config)
+	if err != nil {
+		return nil, fmt.Errorf("error instantiate consumer err: %w", err)
+	}
+	return consumerGroup, nil
+}
+
+// consumeTimeout is WaitFor when set, Timeout otherwise.
+func (e Executor) consumeTimeout() time.Duration {
+	timeout := time.Duration(e.Timeout) * time.Second
+	if e.WaitFor > 0 {
+		timeout = time.Duration(e.WaitFor) * time.Second
+	}
+	return timeout
+}
+
+// logConsumeErrors logs the consumer group's errors until the channel closes; with WaitFor set, a
+// deadline is the expected end of the wait and is not logged.
+func (e Executor) logConsumeErrors(ctx context.Context, consumerGroup sarama.ConsumerGroup) {
+	for err := range consumerGroup.Errors() {
+		if e.WaitFor > 0 && errors.Is(err, context.DeadlineExceeded) {
+			continue
+		}
+
+		venom.Error(ctx, "error on consume:%s", err)
+	}
+}
+
+// waitConsumed waits for the consumer to return or the context to end. With WaitFor set, reaching the
+// deadline ends the wait normally.
+func (e Executor) waitConsumed(ctx context.Context, cherr <-chan error) error {
 	select {
 	case err := <-cherr:
 		if err != nil {
 			if e.WaitFor > 0 && errors.Is(err, context.DeadlineExceeded) {
 				venom.Info(ctx, "wait ended")
 			} else {
-				return nil, nil, fmt.Errorf("error on consume: %w", err)
+				return fmt.Errorf("error on consume: %w", err)
 			}
 		}
 	case <-ctx.Done():
@@ -357,20 +419,23 @@ func (e Executor) consumeMessages(ctx context.Context) ([]Message, []interface{}
 			if e.WaitFor > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				venom.Info(ctx, "wait ended")
 			} else {
-				return nil, nil, fmt.Errorf("kafka consumed failed: %w", ctx.Err())
+				return fmt.Errorf("kafka consumed failed: %w", ctx.Err())
 			}
 		}
 	}
 
-	return h.messages, h.messagesJSON, nil
+	return nil
 }
 
-func (e Executor) getKafkaConfig() (*sarama.Config, error) {
-	config := sarama.NewConfig()
-	config.Net.TLS.Enable = e.WithTLS
-	config.Net.TLS.Config = &tls.Config{
-		InsecureSkipVerify: e.InsecureTLS,
+func (e Executor) getKafkaConfig(ctx context.Context) (*sarama.Config, error) {
+	tlsConfig, err := e.tlsConfig(ctx)
+	if err != nil {
+		return nil, err
 	}
+
+	config := sarama.NewConfig()
+	config.Net.TLS.Enable = e.tlsEnabled()
+	config.Net.TLS.Config = tlsConfig
 	config.Net.SASL.Enable = e.WithSASL
 	config.Net.SASL.User = e.User
 	config.Net.SASL.Password = e.Password
@@ -378,8 +443,12 @@ func (e Executor) getKafkaConfig() (*sarama.Config, error) {
 	config.Net.DialTimeout = defaultDialTimeout
 	config.Version = sarama.V2_6_0_0
 
-	if e.KafkaVersion != "" {
-		kafkaVersion, err := sarama.ParseKafkaVersion(e.KafkaVersion)
+	version := e.KafkaVersion
+	if version == "" {
+		version = e.KafkaVersionSnake
+	}
+	if version != "" {
+		kafkaVersion, err := sarama.ParseKafkaVersion(version)
 		if err != nil {
 			return config, fmt.Errorf("error parsing Kafka version %v err: %w", kafkaVersion, err)
 		}
@@ -387,6 +456,35 @@ func (e Executor) getKafkaConfig() (*sarama.Config, error) {
 	}
 
 	return config, nil
+}
+
+// tlsEnabled reports whether withTLS or with_tls is on.
+func (e Executor) tlsEnabled() bool {
+	return e.WithTLS || e.WithTLSSnake
+}
+
+// warnf is venom.Warning; a test replaces it.
+var warnf = venom.Warning
+
+// tlsConfig returns the client TLS configuration, built by the shared tlsconfig package (ADR-0009). insecureTLS or
+// insecure_tls skips the broker certificate check; the client certificate is still sent. tls_root_ca,
+// tls_client_cert and tls_client_key are used only when TLS is on: otherwise they are not read, a warning says so,
+// and the configuration is the one kafka always built. Half a client pair fails in every case.
+func (e Executor) tlsConfig(ctx context.Context) (*tls.Config, error) {
+	if err := tlsconfig.CheckClientPair(e.TLSClientCert, e.TLSClientKey); err != nil {
+		return nil, err
+	}
+	settings := tlsconfig.Settings{InsecureSkipVerify: e.InsecureTLS || e.InsecureTLSSnake}
+	switch {
+	case e.tlsEnabled():
+		settings.Workdir = venom.StringVarFromCtx(ctx, "venom.testsuite.workdir")
+		settings.RootCA = e.TLSRootCA
+		settings.ClientCert = e.TLSClientCert
+		settings.ClientKey = e.TLSClientKey
+	case e.TLSRootCA != "" || e.TLSClientCert != "":
+		warnf(ctx, "kafka: tls_root_ca, tls_client_cert and tls_client_key are not used without withTLS: the connection is plaintext")
+	}
+	return tlsconfig.New(ctx, settings)
 }
 
 // handler represents a Sarama consumer group consumer
@@ -404,7 +502,7 @@ type handler struct {
 }
 
 // Setup is run at the beginning of a new session, before ConsumeClaim
-func (h *handler) Setup(s sarama.ConsumerGroupSession) error {
+func (h *handler) Setup(_ sarama.ConsumerGroupSession) error {
 	return nil
 }
 

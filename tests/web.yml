@@ -19,7 +19,7 @@ testcases:
   - type: web
     action:
       navigate:
-        url: http://localhost:9280/forms/post
+        url: "http://{{.stackHost}}:9280/forms/post"
     info: "title is '{{.result.title}}'"
     assertions:
     - result.title ShouldBeEmpty

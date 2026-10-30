@@ -175,13 +175,32 @@ type TestCase struct {
 
 	computedVars    H        `json:"-" yaml:"-"`
 	computedVerbose []string `json:"-" yaml:"-"`
-	IsExecutor      bool     `json:"-" yaml:"-"`
-	IsEvaluated     bool     `json:"-" yaml:"-"`
+	// varsFlattener caches the flattened variable scope between the steps of this test case
+	// (#2017). It belongs to the test case rather than to Venom so that nothing is shared between
+	// test files, which keeps it correct as-is when files start running concurrently (#1983).
+	varsFlattener varsFlattener `json:"-" yaml:"-"`
+	// suite is the prepared form of TestSuiteVars, made once for a root test case and inherited by the inner cases of
+	// its custom executors (#2475). Nil on a case built outside runTestCase, which then takes the full path.
+	suite *suiteScope `json:"-" yaml:"-"`
+	// varsOverSuite says that Vars holds only the case's own variables (the inputs of a custom executor, what its steps
+	// add) and that the suite's variables, TestSuiteVars, are implied under them. It is set only on the inner case of a
+	// custom executor whose root case has a prepared suite, so that the case does not hold a second copy of a scope of
+	// thousands of entries (#2475, ADR-0011). fullVars builds the whole scope where a caller needs one.
+	varsOverSuite bool `json:"-" yaml:"-"`
+
+	// out is the console printer of the test file this case belongs to (#2021). It rides on the
+	// test case because every function that prints already receives one — including RunTestStep
+	// and RunUserExecutor, which are exported and shared with upstream, so threading a parameter
+	// through them would break the library API and conflict on every upstream merge. Read it with
+	// v.out(tc), which falls back to the untagged printer for a TestCase built outside a suite.
+	out         *suiteOut `json:"-" yaml:"-"`
+	IsExecutor  bool      `json:"-" yaml:"-"`
+	IsEvaluated bool      `json:"-" yaml:"-"`
 
 	// Source line numbers extracted from YAML parsing (1-indexed)
 	SourceLine           int     `json:"-" yaml:"-"` // line of the testcase definition
-	StepSourceLines      []int   `json:"-" yaml:"-"` // line of each step (indexed by step number)
-	AssertionSourceLines [][]int `json:"-" yaml:"-"` // [stepIdx][assertIdx] -> line number
+	StepSourceLines      []int   `json:"-" yaml:"-"` // line of each step, zero-based, by step index
+	AssertionSourceLines [][]int `json:"-" yaml:"-"` // [stepIdx][assertIdx] -> line number, both zero-based
 }
 
 type TestStepResult struct {
@@ -200,11 +219,25 @@ type TestStepResult struct {
 	AssertionsApplied AssertionsApplied `json:"assertionsApplied" yaml:"-"`
 	Retries           int               `json:"retries" yaml:"retries"`
 
+	// lazyInputs is the scope InputVars is built from when the result is reported (materializeInputVars): holding the
+	// layers keeps a step from retaining its own copy of a scope of thousands of entries (#2475).
+	lazyInputs *scopeLayers
+
 	Systemout string    `json:"systemout"`
 	Systemerr string    `json:"systemerr"`
 	Duration  float64   `json:"duration"`
 	Start     time.Time `json:"start"`
 	End       time.Time `json:"end"`
+}
+
+// materializeInputVars fills InputVars from the scope the step ran with, once. The reports call it before they redact
+// the variables; a result that has no scope pending, or was filled already, is left as it is.
+func (ts *TestStepResult) materializeInputVars() {
+	if ts.lazyInputs == nil {
+		return
+	}
+	ts.InputVars = ts.lazyInputs.materialize()
+	ts.lazyInputs = nil
 }
 
 func (ts *TestStepResult) appendError(err error) {
@@ -332,17 +365,20 @@ func newFailure(ctx context.Context, tc TestCase, stepNumber int, rangedIndex in
 
 // findSourceLine returns the best source line number for a given step and assertion.
 // It tries the assertion line first, then falls back to the step line.
+// stepNumber is one-based, as users see it, while the lines are stored by zero-based step index (#1967);
+// a number below 1 has no step line.
 func (tc TestCase) findSourceLine(stepNumber int, assertionIndex int) int {
+	stepIndex := stepNumber - 1
 	// Try assertion-level line number
-	if assertionIndex >= 0 && stepNumber < len(tc.AssertionSourceLines) {
-		assertions := tc.AssertionSourceLines[stepNumber]
+	if stepIndex >= 0 && assertionIndex >= 0 && stepIndex < len(tc.AssertionSourceLines) {
+		assertions := tc.AssertionSourceLines[stepIndex]
 		if assertionIndex < len(assertions) && assertions[assertionIndex] > 0 {
 			return assertions[assertionIndex]
 		}
 	}
 	// Fall back to step line
-	if stepNumber < len(tc.StepSourceLines) && tc.StepSourceLines[stepNumber] > 0 {
-		return tc.StepSourceLines[stepNumber]
+	if stepIndex >= 0 && stepIndex < len(tc.StepSourceLines) && tc.StepSourceLines[stepIndex] > 0 {
+		return tc.StepSourceLines[stepIndex]
 	}
 	// Fall back to testcase line
 	if tc.SourceLine > 0 {

@@ -72,3 +72,41 @@ func (Executor)	Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 ```
 
 Feel free to open a Pull Request with your executors.
+
+### TLS
+
+Six executors build their own TLS connection: http, grpc, kafka, imap, smtp and ovhapi. They read their TLS
+settings the same way. Each executor keeps its own switch and its own default.
+
+| Executor | TLS is on when | Skip the server check | Root CA | Client certificate and key | Server certificate checked by default |
+|---|---|---|---|---|---|
+| http | `url` starts with `https://` | `ignore_verify_ssl: true` | `tls_root_ca` | `tls_client_cert`, `tls_client_key` | yes |
+| grpc | `tls_root_ca` is set | `ignore_verify_ssl: true` | `tls_root_ca` | `tls_client_cert`, `tls_client_key` | yes |
+| kafka | `with_tls: true` (or `withTLS`) | `insecure_tls: true` (or `insecureTLS`) | `tls_root_ca` | `tls_client_cert`, `tls_client_key` | yes |
+| imap | `auth.withtls: true` | leave `auth.verifytls` unset or `false` | `auth.tls_root_ca` | `auth.tls_client_cert`, `auth.tls_client_key` | no: set `auth.verifytls: true` |
+| smtp | `withtls: true` | leave `verifytls` unset or `false` | `tls_root_ca` | `tls_client_cert`, `tls_client_key` | no: set `verifytls: true` |
+| ovhapi | `endpoint` is `https://` (the named endpoints, such as `ovh-eu`, are) | none | `tlsRootCA` or `tls_root_ca`, else the `ovh.tlsRootCA` variable | none: the OVH API does not use one | yes |
+
+The rules they share:
+
+- A root CA, a client certificate or a key is either the PEM text itself or the path of a PEM file. A relative path
+  is read from the test suite's directory. Several CAs can be concatenated in one root CA.
+- The root CA is trusted on top of the system roots, so a server signed by a private CA is verified without skipping
+  the check.
+- Skipping the server check makes the root CA irrelevant, but the client certificate is still sent.
+- A client certificate without its key, or a key without its certificate, fails the step with an error that names the
+  missing setting. This holds even when TLS is off.
+- On grpc, kafka, imap and smtp, a root CA or a client certificate given while TLS is off is not used: the connection
+  stays plaintext and venom logs a warning. On http and ovhapi the URL decides: with an `http://` URL venom logs a
+  warning too, which says that a redirect to `https://` or an `https://` proxy (the step's `proxy`, `ovh.proxy` or
+  `HTTPS_PROXY`/`HTTP_PROXY`) still uses them (http follows redirects unless `no_follow_redirect` is set). An ovhapi endpoint name such as `ovh-eu` is an `https://` URL and never warns.
+- kafka reads both spellings of its two switches: `with_tls` or `withTLS`, `insecure_tls` or `insecureTLS`. Either
+  one turns its switch on.
+- ovhapi refuses a step that sets both `tlsRootCA` and `tls_root_ca`.
+
+Out of scope: the executors whose TLS comes from a connection string or a driver (sql, mongo, redis, amqp, rabbitmq,
+mqtt, couchbase) and the web executor, which always ignores HTTPS certificate errors (see its README).
+
+`executors/tls_conformance_test.go` runs the same cases through all six executors against one throwaway CA: a trusted
+CA, a CA that did not sign the server certificate, a skipped check with a client certificate, and a certificate
+without its key.

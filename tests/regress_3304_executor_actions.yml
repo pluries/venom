@@ -1,0 +1,10 @@
+name: Regression 3304 - custom executor body, printf left for the step pass and default as before
+vars:
+  testvar: hello
+testcases:
+- name: printf sees the suite variable, default is unchanged
+  steps:
+  - type: regress_3304_executor_actions
+    assertions:
+    - result.printed ShouldContainSubstring A[hello]
+    - result.printed ShouldContainSubstring B[x,y]

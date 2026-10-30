@@ -1,6 +1,6 @@
 name: Couchbase Test Suite
 vars:
-  couchbase_dsn: "couchbase://localhost"
+  couchbase_dsn: "couchbase://{{.stackHost}}"
   couchbase_username: "Administrator"
   couchbase_password: "password"
 

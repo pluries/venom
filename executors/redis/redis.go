@@ -113,7 +113,7 @@ func getCommandDetails(command string) (name string, arg []interface{}, err erro
 	}
 
 	name = cmd[0]
-	arguments := append(cmd[:0], cmd[1:]...)
+	arguments := cmd[1:]
 
 	args := sliceStringToSliceInterface(arguments)
 
@@ -139,7 +139,7 @@ func handleRedisResponse(res interface{}, err error) interface{} {
 		}
 		return result
 	default:
-		t, _ := redis.String(res, err) // nolint
+		t, _ := redis.String(res, err) //nolint:errcheck // best-effort display conversion; a non-string reply returns "" as before
 		return t
 	}
 }

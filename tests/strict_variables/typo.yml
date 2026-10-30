@@ -1,0 +1,6 @@
+name: strict variables, a typo in a variable name
+testcases:
+- name: typo
+  steps:
+  - type: exec
+    script: echo "hello {{.greting}}"

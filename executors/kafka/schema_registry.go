@@ -42,7 +42,7 @@ func NewWithClient(schemaRegistryHost string, httpClient *http.Client) (SchemaRe
 func (c client) GetSchemaByID(id int) (string, error) {
 	schema, err := c.client.GetSchemaByID(id)
 	if err != nil {
-		return "", fmt.Errorf("could not get schema id %q from schema registry: %w", id, err)
+		return "", fmt.Errorf("could not get schema id %d from schema registry: %w", id, err)
 	}
 
 	return schema, nil

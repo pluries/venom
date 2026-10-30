@@ -1,6 +1,7 @@
 *.cid
 *.log
 venom.test
+/venom
 *.args.file
 *.cover.out
 *.error.out
@@ -8,3 +9,4 @@ venom.test
 *.out
 *.test.out
 test_results.*
+/plugin/lib/*.so

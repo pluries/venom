@@ -1,0 +1,13 @@
+name: user-executor-input-named-script
+vars:
+  lines:
+  - lineA
+  - lineB
+
+testcases:
+- name: list-valued-script-input
+  steps:
+  - type: withScriptArray
+    script: {{.lines}}
+    assertions:
+    - result.lines ShouldEqual ["lineA","lineB"]

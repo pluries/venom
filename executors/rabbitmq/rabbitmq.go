@@ -7,10 +7,9 @@ import (
 	"time"
 
 	"github.com/mitchellh/mapstructure"
+	amqp "github.com/rabbitmq/amqp091-go"
 
 	"github.com/ovh/venom"
-
-	"github.com/streadway/amqp"
 )
 
 // Name of executor
@@ -154,7 +153,7 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 	return result, nil
 }
 
-func (e Executor) publishMessages(ctx context.Context, workdir string, connection *amqp.Connection, channel *amqp.Channel, rpc bool) error {
+func (e Executor) publishMessages(ctx context.Context, _ string, connection *amqp.Connection, channel *amqp.Channel, rpc bool) error {
 	var ch *amqp.Channel
 	var err error
 	if connection == nil || channel == nil {
@@ -209,7 +208,7 @@ func (e Executor) publishMessages(ctx context.Context, workdir string, connectio
 		if !e.Messages[i].Persistent {
 			deliveryMode = amqp.Transient
 		}
-		var replyTo string = e.Messages[i].ReplyTo
+		var replyTo = e.Messages[i].ReplyTo
 		if rpc {
 			replyTo = "amq.rabbitmq.reply-to"
 		}
@@ -265,7 +264,7 @@ func (e Executor) processMessage(ctx context.Context, msg amqp.Delivery, ok bool
 	bodyJSONArray := []interface{}{}
 	if err := venom.JSONUnmarshal(msg.Body, &bodyJSONArray); err != nil {
 		bodyJSONMap := map[string]interface{}{}
-		venom.JSONUnmarshal(msg.Body, &bodyJSONMap) //nolint
+		venom.JSONUnmarshal(msg.Body, &bodyJSONMap) //nolint:errcheck // fallback parse: a non-JSON body leaves the map empty, the raw body is kept in body
 		bodyJSON = append(bodyJSON, bodyJSONMap)
 	} else {
 		bodyJSON = append(bodyJSON, bodyJSONArray)

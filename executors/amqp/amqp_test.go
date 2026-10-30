@@ -1,10 +1,13 @@
 package amqp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
+	amqp "github.com/Azure/go-amqp"
 	"github.com/mitchellh/mapstructure"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -430,9 +433,10 @@ func TestExecutor_JSONParsing(t *testing.T) {
 			if tt.shouldParse {
 				assert.NoError(t, err, "Expected valid JSON")
 			} else {
-				if tt.message == "" {
+				switch tt.message {
+				case "":
 					assert.Error(t, err, "Expected error for empty string")
-				} else if tt.message == "plain text message" {
+				case "plain text message":
 					assert.Error(t, err, "Expected error for plain text")
 				}
 			}
@@ -584,5 +588,49 @@ func TestExecutor_MultipleMessagesWithDifferentFormats(t *testing.T) {
 		case 1: // Plain text
 			assert.Error(t, err, "Message %d should not be valid JSON", i)
 		}
+	}
+}
+
+// fakeReceiver stands in for *amqp.Receiver. AcceptMessage blocks until the
+// context it is given is done, like a broker that never answers the disposition.
+type fakeReceiver struct {
+	accepting chan struct{}
+}
+
+func (f *fakeReceiver) Receive(_ context.Context, _ *amqp.ReceiveOptions) (*amqp.Message, error) {
+	return amqp.NewMessage([]byte(`{"a":1}`)), nil
+}
+
+func (f *fakeReceiver) AcceptMessage(ctx context.Context, _ *amqp.Message) error {
+	close(f.accepting)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func Test_consumeMessage_AcceptHonoursContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	recv := &fakeReceiver{accepting: make(chan struct{})}
+
+	type outcome struct{ err error }
+	done := make(chan outcome, 1)
+	go func() {
+		_, _, err := consumeMessage(ctx, recv)
+		done <- outcome{err}
+	}()
+
+	select {
+	case <-recv.accepting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("AcceptMessage was never reached")
+	}
+	cancel()
+
+	select {
+	case o := <-done:
+		require.Error(t, o.err)
+		assert.ErrorIs(t, o.err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("consumeMessage did not return after the context was cancelled: AcceptMessage ignores ctx")
 	}
 }

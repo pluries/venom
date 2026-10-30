@@ -161,7 +161,8 @@ func (e Executor) session(ctx context.Context, subscriber func(client mq.Client,
 		// else connection complete, all good.
 	case <-time.After(time.Duration(e.Timeout) * time.Millisecond):
 		venom.Debug(ctx, "connection timeout")
-		return nil, errors.Wrap(token.Error(), "failed to connect to MQTT")
+		// the token has no error yet: wrapping it would return a nil error together with a nil client
+		return nil, errors.Errorf("failed to connect to MQTT: no answer within the timeout of %d ms", e.Timeout)
 	case <-ctx.Done():
 		venom.Debug(ctx, "Context requested cancellation in session()")
 		return nil, errors.New("Context requested cancellation in session()")
@@ -293,7 +294,7 @@ func (e Executor) persistMessages(ctx context.Context) error {
 	defer client.Disconnect(disconnectTimeoutMs)
 
 	for _, topic := range e.Topics {
-		token := client.Subscribe(topic, e.QOS, func(client mq.Client, message mq.Message) {
+		token := client.Subscribe(topic, e.QOS, func(_ mq.Client, message mq.Message) {
 			venom.Debug(ctx, "msg received in persist request: %v", string(message.Payload()))
 		})
 		select {
@@ -316,7 +317,7 @@ func (e Executor) persistMessages(ctx context.Context) error {
 
 // newSubscriber is a topic subscription handler that forwards onto the passed channel
 func newSubscriber(ctx context.Context, ch chan mq.Message) func(client mq.Client, message mq.Message) {
-	return func(client mq.Client, message mq.Message) {
+	return func(_ mq.Client, message mq.Message) {
 		t := message.Topic()
 		m := message.Payload()
 		venom.Debug(ctx, "rx message in subscribe handler: %s len(%d), %v", t, len(m), m)

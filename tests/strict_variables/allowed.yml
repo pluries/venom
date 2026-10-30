@@ -1,0 +1,16 @@
+name: strict variables, forms that are never flagged
+vars:
+  greeting: hello
+testcases:
+- name: allowed forms
+  steps:
+  - type: exec
+    script: echo extracted-value
+    vars:
+      got:
+        from: result.systemout
+  - type: exec
+    range: [a, b]
+    script: echo "{{.greeting}} {{.got}} {{.value}} {{.venom.testsuite.shortName}} {{.nothing | default 1}} {{.nothing | ternary 1 2}}"
+    assertions:
+    - result.code ShouldEqual 0

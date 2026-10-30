@@ -4,7 +4,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ovh/venom/cmd/venom/run"
-	"github.com/ovh/venom/cmd/venom/update"
 	"github.com/ovh/venom/cmd/venom/version"
 )
 
@@ -22,5 +21,4 @@ func New() *cobra.Command {
 func addCommands(cmd *cobra.Command) {
 	cmd.AddCommand(run.Cmd)
 	cmd.AddCommand(version.Cmd)
-	cmd.AddCommand(update.Cmd)
 }

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rockbears/yaml"
+	"github.com/ovh/venom/internal/yamljson"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -189,7 +189,7 @@ func TestUserExecutorYAMLUnmarshalWithQuotedJSON(t *testing.T) {
 
 			// Then try YAML unmarshalling (which is what actually happens in Venom)
 			var yamlResult interface{}
-			err = yaml.Unmarshal([]byte(interpolated), &yamlResult)
+			err = yamljson.Unmarshal([]byte(interpolated), &yamlResult)
 			if tt.shouldSucceed {
 				assert.NoError(t, err, "YAML unmarshalling should succeed: %s", tt.description)
 				assert.NotNil(t, yamlResult, "YAML result should not be nil")
@@ -219,7 +219,7 @@ result:
 
 		// This should not fail with our fix
 		var result interface{}
-		err := yaml.Unmarshal([]byte(yamlContent), &result)
+		err := yamljson.Unmarshal([]byte(yamlContent), &result)
 		require.NoError(t, err, "YAML unmarshalling should succeed with properly escaped quotes")
 
 		// Verify the structure is correct

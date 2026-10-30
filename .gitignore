@@ -1,5 +1,6 @@
 .idea
-.vscode
+.vscode/*
+!.vscode/extensions.json
 cmd/venom/bin
 tests/pprof*
 tests/.DS_Store
@@ -25,5 +26,43 @@ tests/grpc/pki
 tests/pki_variables.yml
 *.log
 *.xml
+!jenkins/jobs/*.xml
 test_results*.html
 !venom_output.html
+.claude/settings.local.json
+.claude/.work-timer.json
+.claude/.ai-effort.json
+.claude/*.bak-*
+venom.linux-amd64
+
+# --- SDLC hygiene (/cst-repo-setup §5) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.key
+secrets/
+.claude/.fix-in-progress
+
+# --- CI scan artifacts (/cst-pipelines-ado) ---
+.scannerwork/
+coverage.out
+bom.json
+test-output.txt
+junit-report.xml
+
+# --- artefacts of running the test suites from the repository root ---
+# `go build ./cmd/venom` without -o drops the binary here; tests/db_fixtures.yml declares
+# `dsn: "memory"`, which makes the sqlite driver create a database file of that name in the
+# working directory. Neither belongs in the repository, and this one publishes one-way to a
+# public mirror (scripts/publish-github.sh).
+/venom
+/memory
+
+# --- modernisation discovery (#2002): the symlink to the second checkout and the redacted-secrets files never enter git ---
+legacy/
+analysis/**/SECRETS*
+
+# diagnostics of a failing mobile step, written in the working directory (executors/mobile)
+screen.png

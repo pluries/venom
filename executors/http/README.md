@@ -13,6 +13,7 @@ In your yaml file, you can use:
   - query_parameters (optional)
   - body (optional)
   - bodyFile (optional)
+  - multipart_form (optional): cannot be combined with body or bodyFile
   - preserve_bodyfile (optional) skip file content interpolation
   - headers (optional)
   - proxy (optional): set to use a proxy server for connection to url
@@ -23,9 +24,10 @@ In your yaml file, you can use:
   - no_follow_redirect (optional): indicates that you don't want to follow Location if server returns a Redirect (301/302/...)
   - skip_body: skip the body and bodyjson result
   - skip_headers: skip the headers result
-  - tls_client_cert (optional): a chain of certificates to identify the caller, first certificate in the chain is considered as the leaf, followed by intermediates. Setting it enables mutual TLS authentication. Set the PEM content or the path to the PEM file.
-  - tls_client_key (optional): private key corresponding to the certificate. Set the PEM content or the path to the PEM file.
+  - tls_client_cert (optional): a chain of certificates to identify the caller, first certificate in the chain is considered as the leaf, followed by intermediates. Setting it enables mutual TLS authentication, and the certificate is sent even when ignore_verify_ssl is true. Set the PEM content or the path to the PEM file. It needs tls_client_key: a certificate without its key fails the step.
+  - tls_client_key (optional): private key corresponding to the certificate. Set the PEM content or the path to the PEM file. It needs tls_client_cert: a key without its certificate fails the step.
   - tls_root_ca (optional): defines additional root CAs to perform the call. Can contain multiple CAs concatenated together. Set the PEM content or the path to the PEM file.
+  - tls_root_ca, tls_client_cert and tls_client_key only serve TLS connections. With an `http://` url the step logs a warning; a redirect to `https://` or an `https://` proxy still uses them.
 
 ```
 
@@ -110,7 +112,35 @@ testcases:
 
 
 ```
-*NB: to post a file with multipart_form, prefix the path to the file with '@'*
+
+## Multipart form
+
+`multipart_form` sends the request body as `multipart/form-data`. It cannot be combined with `body` or `bodyFile`.
+
+Each key is a form field. A value is either a single string, or a list of strings
+to send the same field name once per item (e.g. a repeated `files` part for a multi-file upload).
+
+A value starting with `@` is the path of a file to upload, resolved from the current
+working directory. Append `;type=<content-type>` to set the Content-Type of that part;
+it defaults to `application/octet-stream`. This mirrors curl's `-F field=@path;type=...`.
+
+```yaml
+- name: upload files
+  steps:
+  - type: http
+    method: POST
+    url: https://httpbin.org/post
+    multipart_form:
+      description: "a plain text field"
+      tags:
+        - "first"
+        - "second"
+      files:
+        - "@./testdata/report.pdf;type=application/pdf"
+        - "@./testdata/notes.txt;type=text/plain"
+    assertions:
+    - result.statuscode ShouldEqual 200
+```
 
 ## Output
 

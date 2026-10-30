@@ -2,7 +2,7 @@ package readfile
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // used as a content-identity checksum exposed as result.md5sum, not a cryptographic primitive
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rockbears/yaml"
+	"github.com/ovh/venom/internal/yamljson"
 
 	"github.com/mattn/go-zglob"
 	"github.com/mitchellh/mapstructure"
@@ -69,7 +69,7 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 	}
 
 	if e.Path == "" {
-		return nil, fmt.Errorf("Invalid path")
+		return nil, fmt.Errorf("invalid path")
 	}
 
 	start := time.Now()
@@ -94,18 +94,18 @@ func (e *Executor) readfile(ctx context.Context, workdir string) (Result, error)
 		absPath = filepath.Join(workdir, e.Path)
 	}
 
-	fileInfo, _ := os.Stat(absPath) // nolint
+	fileInfo, _ := os.Stat(absPath) //nolint:errcheck // only probes whether the path is a directory; fileInfo is nil-checked and Glob reports a missing path
 	if fileInfo != nil && fileInfo.IsDir() {
 		absPath = filepath.Dir(absPath)
 	}
 
 	filesPath, errg := zglob.Glob(absPath)
 	if errg != nil {
-		return result, fmt.Errorf("Error reading files on path:%s :%s", absPath, errg)
+		return result, fmt.Errorf("error reading files on path:%s :%s", absPath, errg)
 	}
 
 	if len(filesPath) == 0 {
-		return result, fmt.Errorf("Invalid path '%s' or file not found", absPath)
+		return result, fmt.Errorf("invalid path '%s' or file not found", absPath)
 	}
 
 	var content string
@@ -126,6 +126,7 @@ func (e *Executor) readfile(ctx context.Context, workdir string) (Result, error)
 			return result, fmt.Errorf("error cannot evaluate relative path to file at %s: %s", f.Name(), errRelative)
 		}
 
+		//nolint:gosec // content-identity checksum exposed as result.md5sum; switching algorithms would break every suite asserting on it
 		h := md5.New()
 		tee := io.TeeReader(f, h)
 
@@ -157,7 +158,7 @@ func (e *Executor) readfile(ctx context.Context, workdir string) (Result, error)
 	var m interface{}
 	if strings.HasSuffix(e.Path, "yaml") || strings.HasSuffix(e.Path, "yml") {
 		venom.Debug(ctx, "trying to parse yaml file")
-		resp, errConvert := yaml.YAMLToJSON([]byte(content))
+		resp, errConvert := yamljson.YAMLToJSON([]byte(content))
 		if errConvert != nil {
 			venom.Warn(ctx, "could not convert payload from file")
 			return result, nil

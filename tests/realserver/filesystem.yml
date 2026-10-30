@@ -1,0 +1,120 @@
+name: MCP executor against the real filesystem server
+# What it is: a venom suite that drives a real, third-party MCP server
+# (@modelcontextprotocol/server-filesystem) through the mcp executor over stdio.
+#
+# Run it by hand, from the tests/ directory:
+#   cd tests && venom run realserver/filesystem.yml
+# It needs node, npx and the npm network (npx downloads the package at run time).
+#
+# Why it sits in tests/realserver/ and not in tests/: `make run-test` only runs
+# the ./*.yml glob of tests/. This suite needs the network and runs third-party
+# code, so it must never be part of the default run.
+#
+# Pinned target:
+#   package   @modelcontextprotocol/server-filesystem@2026.1.14
+#   integrity sha512-bGAfu3fWRVeF10NxvPhFBDlRen6ExSx6YkKJzoVgQMNrbdVVV4okfGGQ3KBRu9ygXYfw5/N9ermHAJXA0uys+g==
+#   licence   MIT: package.json and the registry say MIT, and the package README
+#             says it is licensed under the MIT License. The package ships no
+#             separate LICENSE file.
+# Limit: the integrity hash covers the package tarball only. Its transitive npm
+# dependencies are resolved at run time and float.
+#
+# Decision: running this third-party server as a test target is the maker's
+# decision. It is not in go.mod, not in the SBOM and not scanned by Dependency-Track.
+#
+# Isolation: the server starts through `env -i`, so no variable of the caller's
+# shell reaches third-party code, and it may only touch the temp directory.
+# No token, no secret, no package.json, no lock file.
+#
+# Tool names below are those of the pinned version (2026.1.14).
+
+testcases:
+- name: prepare
+  steps:
+  - name: temp directory with a synthetic file
+    type: exec
+    script: |
+      d="$(mktemp -d)"
+      printf 'venom real server ok\n' > "$d/hello.txt"
+      echo "$d"
+    assertions:
+    - result.code ShouldEqual 0
+    vars:
+      tmpdir:
+        from: result.systemout
+        regex: (/\S+)
+  - name: directory of the node binary
+    type: exec
+    script: dirname "$(command -v npx)"
+    assertions:
+    - result.code ShouldEqual 0
+    vars:
+      nodebin:
+        from: result.systemout
+        regex: (/\S+)
+
+- name: initialize
+  steps:
+  - type: mcp
+    transport: stdio
+    command: [env, -i, "PATH={{.prepare.nodebin}}:/usr/bin:/bin", "HOME={{.prepare.tmpdir}}", npx, -y, "@modelcontextprotocol/server-filesystem@2026.1.14", "{{.prepare.tmpdir}}"]
+    method: initialize
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.serverinfo.name ShouldNotBeEmpty
+    - result.protocolversion ShouldNotBeEmpty
+    # vars extraction: keep a value of the result for the following test cases,
+    # read below as {{.initialize.servername}}.
+    vars:
+      servername:
+        from: result.serverinfo.name
+
+- name: tools list
+  steps:
+  - type: mcp
+    transport: stdio
+    command: [env, -i, "PATH={{.prepare.nodebin}}:/usr/bin:/bin", "HOME={{.prepare.tmpdir}}", npx, -y, "@modelcontextprotocol/server-filesystem@2026.1.14", "{{.prepare.tmpdir}}"]
+    method: tools/list
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.tools ShouldContainSubstring list_directory
+    - result.tools ShouldContainSubstring read_text_file
+
+- name: list the directory
+  steps:
+  - type: mcp
+    transport: stdio
+    command: [env, -i, "PATH={{.prepare.nodebin}}:/usr/bin:/bin", "HOME={{.prepare.tmpdir}}", npx, -y, "@modelcontextprotocol/server-filesystem@2026.1.14", "{{.prepare.tmpdir}}"]
+    method: tools/call
+    tool: list_directory
+    arguments:
+      path: "{{.prepare.tmpdir}}"
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.text ShouldContainSubstring hello.txt
+
+- name: read the file
+  steps:
+  - type: mcp
+    transport: stdio
+    command: [env, -i, "PATH={{.prepare.nodebin}}:/usr/bin:/bin", "HOME={{.prepare.tmpdir}}", npx, -y, "@modelcontextprotocol/server-filesystem@2026.1.14", "{{.prepare.tmpdir}}"]
+    method: tools/call
+    tool: read_text_file
+    arguments:
+      path: "{{.prepare.tmpdir}}/hello.txt"
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.text ShouldContainSubstring 'venom real server ok'
+  - name: the server name captured at initialize is still there
+    type: exec
+    script: echo "{{.initialize.servername}}"
+    assertions:
+    - result.code ShouldEqual 0
+    - result.systemout ShouldNotBeEmpty
+
+- name: cleanup
+  steps:
+  - type: exec
+    script: rm -rf "{{.prepare.tmpdir}}"
+    assertions:
+    - result.code ShouldEqual 0

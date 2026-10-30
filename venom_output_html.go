@@ -13,7 +13,7 @@ import (
 var templateHTML string
 
 type TestsHTML struct {
-	Tests     Tests  `json:"tests"`
+	Tests     Tests       `json:"tests"`
 	JSONValue template.JS `json:"jsonValue"`
 }
 
@@ -26,7 +26,8 @@ func outputHTML(testsResult *Tests) ([]byte, error) {
 	}
 
 	testsHTML := TestsHTML{
-		Tests:     *testsResult,
+		Tests: *testsResult,
+		//nolint:gosec // json.MarshalIndent HTML-escapes <, > and & by default, which already neutralises the </script> breakout this cast would otherwise reintroduce
 		JSONValue: template.JS(testJSON),
 	}
 	tmpl := template.Must(template.New("reportHTML").Parse(templateHTML))

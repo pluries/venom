@@ -3,7 +3,6 @@ package http
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,6 +21,7 @@ import (
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/ovh/venom"
+	"github.com/ovh/venom/executors/internal/tlsconfig"
 	"github.com/ovh/venom/interpolate"
 )
 
@@ -72,7 +73,7 @@ type Result struct {
 	Systemout   string      `json:"systemout,omitempty" yaml:"systemout,omitempty"`
 }
 
-type HTTPRequest struct {
+type HTTPRequest struct { //nolint:revive // exported name kept for module compatibility (plugins, library users, upstream merges)
 	Method   string      `json:"method,omitempty"`
 	URL      string      `json:"url,omitempty"`
 	Header   http.Header `json:"header,omitempty"`
@@ -111,13 +112,91 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 		return nil, err
 	}
 
+	e.setHeaders(req)
+
+	client, err := e.newClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	cReq := req.Clone(ctx)
+	result.Request, err = captureRequest(cReq, req)
+	if err != nil {
+		return nil, err
+	}
+	if cReq.Body != nil {
+		defer cReq.Body.Close()
+	}
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		result.Err = err.Error()
+		return result, err
+	}
+	elapsed := time.Since(start)
+	result.TimeSeconds = elapsed.Seconds()
+
+	if resp.Body != nil {
+		defer resp.Body.Close()
+
+		if err := e.readResponseBody(resp, &result); err != nil {
+			return nil, err
+		}
+	}
+
+	if !e.SkipHeaders {
+		result.Headers = responseHeaders(resp.Header)
+	}
+
+	requestContentType := result.Request.Header.Get("Content-Type")
+	// if PreserveBodyFile == true, the body is not interpolated.
+	// So, no need to keep it in request here (to re-inject it in vars)
+	// this will avoid to be interpolated after in vars too.
+	if e.PreserveBodyFile || !isContentTypeSupported(requestContentType) {
+		result.Request.Body = ""
+	}
+
+	result.StatusCode = resp.StatusCode
+	return result, nil
+}
+
+// setHeaders applies the step headers to the request; a "host" header also sets req.Host.
+func (e Executor) setHeaders(req *http.Request) {
 	for k, v := range e.Headers {
 		req.Header.Set(k, v)
 		if strings.ToLower(k) == "host" {
 			req.Host = v
 		}
 	}
+}
 
+// newClient builds the HTTP client of the step: its transport, a per-call cookie jar and the redirect policy.
+func (e Executor) newClient(ctx context.Context) (*http.Client, error) {
+	tr, err := e.newTransport(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// cookie jar can be used with redirects in the same call
+	// this doesn't support cross steps cookies.
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Transport: tr, Jar: jar}
+	if e.NoFollowRedirect {
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+	return client, nil
+}
+
+// newTransport builds the transport: proxy from the environment, TLS options, the resolve or unix_sock dialer,
+// then the step's explicit proxy.
+func (e Executor) newTransport(ctx context.Context) (*http.Transport, error) {
 	var opts []func(*http.Transport) error
 	opts = append(opts, WithProxyFromEnv())
 
@@ -136,6 +215,20 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 		return nil, fmt.Errorf("you can't use resolve and unix_sock attributes in the same time")
 	}
 
+	e.setDialer(tr)
+
+	if len(e.Proxy) > 0 {
+		proxyURL, err := url.Parse(e.Proxy)
+		if err != nil {
+			return nil, err
+		}
+		tr.Proxy = http.ProxyURL(proxyURL)
+	}
+	return tr, nil
+}
+
+// setDialer replaces the transport's dialer when the step asks for resolve tuples or a unix socket.
+func (e Executor) setDialer(tr *http.Transport) {
 	if len(e.Resolve) > 0 {
 		tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			// resolve can contains foo.com:443:127.0.0.1
@@ -152,7 +245,8 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 			dialer := &net.Dialer{
 				Timeout:   30 * time.Second,
 				KeepAlive: 30 * time.Second,
-				DualStack: true,
+				// DualStack removed: it has been a no-op since Go 1.12 — Fast Fallback (Happy
+				// Eyeballs) is on by default (SA1019, #2028).
 			}
 			return dialer.DialContext(ctx, network, addr)
 		}
@@ -164,103 +258,67 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 			})
 		}
 	}
+}
 
-	if len(e.Proxy) > 0 {
-		proxyURL, err := url.Parse(e.Proxy)
-		if err != nil {
-			return nil, err
-		}
-		tr.Proxy = http.ProxyURL(proxyURL)
-	}
-
-	// cookie jar can be used with redirects in the same call
-	// this doesn't support cross steps cookies.
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, err
-	}
-
-	client := &http.Client{Transport: tr, Jar: jar}
-	if e.NoFollowRedirect {
-		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		}
-	}
-
-	cReq := req.Clone(ctx)
-	result.Request.Method = cReq.Method
-	result.Request.URL = req.URL.String()
+// captureRequest records what is sent, read from a clone of the request (cReq) so the body can be re-read;
+// the URL is the one of the original request. The caller owns the closing of cReq.Body.
+func captureRequest(cReq, req *http.Request) (HTTPRequest, error) {
+	var r HTTPRequest
+	r.Method = cReq.Method
+	r.URL = req.URL.String()
 	if cReq.Body != nil {
 		body, err := cReq.GetBody()
 		if err != nil {
-			return nil, err
+			return HTTPRequest{}, err
 		}
 		btes, err := io.ReadAll(body)
 		if err != nil {
-			return nil, err
+			return HTTPRequest{}, err
 		}
-		defer cReq.Body.Close()
-		result.Request.Body = string(btes)
+		r.Body = string(btes)
 	}
-	result.Request.Header = cReq.Header
-	result.Request.Form = cReq.Form
-	result.Request.PostForm = cReq.PostForm
+	r.Header = cReq.Header
+	r.Form = cReq.Form
+	r.PostForm = cReq.PostForm
+	return r, nil
+}
 
-	start := time.Now()
-	resp, err := client.Do(req)
+// readResponseBody fills body, bodyjson and systemout, unless skip_body is set or the content type is not text.
+func (e Executor) readResponseBody(resp *http.Response, result *Result) error {
+	if e.SkipBody || !isBodySupported(resp) {
+		return nil
+	}
+
+	bb, err := io.ReadAll(resp.Body)
 	if err != nil {
-		result.Err = err.Error()
-		return result, err
+		return err
 	}
-	elapsed := time.Since(start)
-	result.TimeSeconds = elapsed.Seconds()
+	result.Body = string(bb)
 
-	var bb []byte
-	if resp.Body != nil {
-		defer resp.Body.Close()
-
-		if !e.SkipBody && isBodySupported(resp) {
-			var err error
-			bb, err = io.ReadAll(resp.Body)
-			if err != nil {
-				return nil, err
-			}
-			result.Body = string(bb)
-
-			if isBodyJSONSupported(resp) {
-				var m interface{}
-				decoder := json.NewDecoder(strings.NewReader(string(bb)))
-				decoder.UseNumber()
-				if err := decoder.Decode(&m); err == nil {
-					result.BodyJSON = m
-				}
-			}
-
-			result.Systemout = buildResultInfo(&result, resp)
+	if isBodyJSONSupported(resp) {
+		var m interface{}
+		decoder := json.NewDecoder(strings.NewReader(string(bb)))
+		decoder.UseNumber()
+		if err := decoder.Decode(&m); err == nil {
+			result.BodyJSON = m
 		}
 	}
 
-	if !e.SkipHeaders {
-		result.Headers = make(map[string]string)
-		for k, v := range resp.Header {
-			if strings.ToLower(k) == "set-cookie" {
-				result.Headers[k] = strings.Join(v, "; ")
-			} else {
-				result.Headers[k] = strings.Join(v, ", ")
-			}
+	result.Systemout = buildResultInfo(result, resp)
+	return nil
+}
+
+// responseHeaders flattens the response headers: Set-Cookie values joined with "; ", the others with ", ".
+func responseHeaders(header http.Header) Headers {
+	headers := make(map[string]string)
+	for k, v := range header {
+		if strings.ToLower(k) == "set-cookie" {
+			headers[k] = strings.Join(v, "; ")
+		} else {
+			headers[k] = strings.Join(v, ", ")
 		}
 	}
-
-	requestContentType := result.Request.Header.Get("Content-Type")
-	// if PreserveBodyFile == true, the body is not interpolated.
-	// So, no need to keep it in request here (to re-inject it in vars)
-	// this will avoid to be interpolated after in vars too.
-	if e.PreserveBodyFile || !isContentTypeSupported(requestContentType) {
-		result.Request.Body = ""
-	}
-
-	result.StatusCode = resp.StatusCode
-	return result, nil
+	return headers
 }
 
 // getRequest returns the request correctly set for the current executor
@@ -274,92 +332,14 @@ func (e Executor) getRequest(ctx context.Context, workdir string) (*http.Request
 		return nil, fmt.Errorf("can only use one of 'body', 'body_file' and 'multipart_form'")
 	}
 
-	body := &bytes.Buffer{}
-	var writer *multipart.Writer
-	if e.Body != "" {
-		body = bytes.NewBuffer([]byte(e.Body))
-	} else if e.BodyFile != "" {
-		bodyfilePath := e.BodyFile
-		if !filepath.IsAbs(e.BodyFile) {
-			// Only join with the workdir with relative path
-			bodyfilePath = filepath.Join(workdir, e.BodyFile)
-		}
-		if _, err := os.Stat(bodyfilePath); !os.IsNotExist(err) {
-			temp, err := os.ReadFile(bodyfilePath)
-			if err != nil {
-				return nil, err
-			}
-			if e.PreserveBodyFile {
-				body = bytes.NewBuffer(temp)
-			} else {
-				h := venom.AllVarsFromCtx(ctx)
-				vars, _ := venom.DumpStringPreserveCase(h)
-				str := string(temp)
-				upperlimit := len(vars)
-				counter := 0
-				for {
-					if !strings.Contains(str, "{{.") {
-						break
-					}
-					stemp, err := interpolate.Do(str, vars)
-					if err != nil {
-						return nil, fmt.Errorf("unable to interpolate file %s: %v", path, err)
-					}
-					if strings.Compare(str, stemp) == 0 && counter > upperlimit {
-						r, _ := regexp.Compile(`{{\..*}}`)
-						return nil, fmt.Errorf("unable to interpolate file due to unresolved variables %s", strings.Join(r.FindAllString(str, -1), ","))
-					}
-					str = stemp
-					counter++
-				}
-				body = bytes.NewBufferString(str)
-			}
-		}
-	} else if e.MultipartForm != nil {
-		form, ok := e.MultipartForm.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("%T 'multipart_form' should be a map", e.MultipartForm)
-		}
-		writer = multipart.NewWriter(body)
-		for key, v := range form {
-			value, ok := v.(string)
-			if !ok {
-				return nil, fmt.Errorf("'multipart_form' should be a map with values as strings")
-			}
-			// Considering file will be prefixed by @ (since you could also post regular data in the body)
-			if strings.HasPrefix(value, "@") {
-				// todo: how can we be sure the @ is not the value we wanted to use ?
-				if _, err := os.Stat(value[1:]); !os.IsNotExist(err) {
-					part, err := writer.CreateFormFile(key, filepath.Base(value[1:]))
-					if err != nil {
-						return nil, err
-					}
-					if err := writeFile(part, value[1:]); err != nil {
-						return nil, err
-					}
-					continue
-				}
-			}
-			if err := writer.WriteField(key, value); err != nil {
-				return nil, err
-			}
-		}
-		if err := writer.Close(); err != nil {
-			return nil, err
-		}
+	body, multipartContentType, err := e.requestBody(ctx, workdir, path)
+	if err != nil {
+		return nil, err
 	}
 
-	if len(e.QueryParameters) > 0 {
-		baseURL, err := url.Parse(path)
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse url %s: %v", path, err)
-		}
-		params := url.Values{}
-		for k, v := range e.QueryParameters {
-			params.Add(k, v)
-		}
-		baseURL.RawQuery = params.Encode()
-		path = baseURL.String()
+	path, err = e.withQueryParameters(path)
+	if err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequest(method, path, body)
@@ -371,10 +351,168 @@ func (e Executor) getRequest(ctx context.Context, workdir string) (*http.Request
 		req.SetBasicAuth(e.BasicAuthUser, e.BasicAuthPassword)
 	}
 
-	if writer != nil {
-		req.Header.Set("Content-Type", writer.FormDataContentType())
+	if multipartContentType != "" {
+		req.Header.Set("Content-Type", multipartContentType)
 	}
 	return req, err
+}
+
+// requestBody returns the body from its one source (body, bodyfile or multipart_form; empty when none) and, for a
+// multipart form only, its Content-Type. path (the URL) names the request in the bodyfile error
+// messages.
+func (e Executor) requestBody(ctx context.Context, workdir, path string) (*bytes.Buffer, string, error) {
+	switch {
+	case e.Body != "":
+		return bytes.NewBuffer([]byte(e.Body)), "", nil
+	case e.BodyFile != "":
+		body, err := e.bodyFromFile(ctx, workdir, path)
+		return body, "", err
+	case e.MultipartForm != nil:
+		return e.multipartBody()
+	}
+	return &bytes.Buffer{}, "", nil
+}
+
+// bodyFromFile reads bodyfile, relative to the workdir, and interpolates it unless preserve_bodyfile is set.
+// A missing file gives an empty body, not an error.
+func (e Executor) bodyFromFile(ctx context.Context, workdir, path string) (*bytes.Buffer, error) {
+	bodyfilePath := e.BodyFile
+	if !filepath.IsAbs(e.BodyFile) {
+		// Only join with the workdir with relative path
+		bodyfilePath = filepath.Join(workdir, e.BodyFile)
+	}
+	if _, err := os.Stat(bodyfilePath); os.IsNotExist(err) {
+		return &bytes.Buffer{}, nil
+	}
+	temp, err := os.ReadFile(bodyfilePath)
+	if err != nil {
+		return nil, err
+	}
+	if e.PreserveBodyFile {
+		return bytes.NewBuffer(temp), nil
+	}
+	str, err := interpolateBodyFile(ctx, string(temp), path)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewBufferString(str), nil
+}
+
+// interpolateBodyFile interpolates the file content with the context variables until no "{{." is left, and fails
+// once a pass changes nothing after more passes than there are variables.
+func interpolateBodyFile(ctx context.Context, str, path string) (string, error) {
+	h := venom.AllVarsFromCtx(ctx)
+	vars, err := venom.DumpStringPreserveCase(h)
+	if err != nil {
+		return "", fmt.Errorf("unable to dump context vars for file %s: %v", path, err)
+	}
+	upperlimit := len(vars)
+	counter := 0
+	for strings.Contains(str, "{{.") {
+		stemp, err := interpolate.Do(str, vars)
+		if err != nil {
+			return "", fmt.Errorf("unable to interpolate file %s: %v", path, err)
+		}
+		if strings.Compare(str, stemp) == 0 && counter > upperlimit {
+			r := regexp.MustCompile(`{{\..*}}`)
+			return "", fmt.Errorf("unable to interpolate file due to unresolved variables %s", strings.Join(r.FindAllString(str, -1), ","))
+		}
+		str = stemp
+		counter++
+	}
+	return str, nil
+}
+
+// multipartBody encodes multipart_form and returns the body with its Content-Type (which carries the boundary).
+func (e Executor) multipartBody() (*bytes.Buffer, string, error) {
+	form, ok := e.MultipartForm.(map[string]interface{})
+	if !ok {
+		return nil, "", fmt.Errorf("%T 'multipart_form' should be a map", e.MultipartForm)
+	}
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	for key, v := range form {
+		values, err := formValues(v)
+		if err != nil {
+			return nil, "", err
+		}
+		for _, value := range values {
+			if err := writeFormPart(writer, key, value); err != nil {
+				return nil, "", err
+			}
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", err
+	}
+	return body, writer.FormDataContentType(), nil
+}
+
+// formValues returns the values of one multipart_form key: a single string, or a list of strings to send the same
+// field name several times (e.g. a repeated "files" part for a multi-file upload).
+func formValues(v interface{}) ([]string, error) {
+	switch t := v.(type) {
+	case string:
+		return []string{t}, nil
+	case []interface{}:
+		values := make([]string, 0, len(t))
+		for _, item := range t {
+			value, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("'multipart_form' list values must be strings, got %T", item)
+			}
+			values = append(values, value)
+		}
+		return values, nil
+	default:
+		return nil, fmt.Errorf("'multipart_form' values must be a string or a list of strings, got %T", v)
+	}
+}
+
+// writeFormPart writes one form value: "@<path>" of an existing file (looked up from the process cwd) as a file
+// part, anything else, including "@<path>" of a missing file, as a plain field. "@<path>;type=<mime>" sets the
+// file part's Content-Type (curl's syntax); the default is application/octet-stream.
+func writeFormPart(writer *multipart.Writer, key, value string) error {
+	// todo: how can we be sure the @ is not the value we wanted to use ?
+	if strings.HasPrefix(value, "@") {
+		filePath, contentType := splitFileType(value[1:])
+		if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+			header := textproto.MIMEHeader{}
+			header.Set("Content-Disposition", multipart.FileContentDisposition(key, filepath.Base(filePath)))
+			header.Set("Content-Type", contentType)
+			part, err := writer.CreatePart(header)
+			if err != nil {
+				return err
+			}
+			return writeFile(part, filePath)
+		}
+	}
+	return writer.WriteField(key, value)
+}
+
+// splitFileType splits a trailing ";type=<mime>" off a file path; without one the type is application/octet-stream.
+func splitFileType(s string) (path, contentType string) {
+	if idx := strings.LastIndex(s, ";type="); idx != -1 {
+		return s[:idx], s[idx+len(";type="):]
+	}
+	return s, "application/octet-stream"
+}
+
+// withQueryParameters replaces the query of path by query_parameters, when there are any.
+func (e Executor) withQueryParameters(path string) (string, error) {
+	if len(e.QueryParameters) == 0 {
+		return path, nil
+	}
+	baseURL, err := url.Parse(path)
+	if err != nil {
+		return "", fmt.Errorf("unable to parse url %s: %v", path, err)
+	}
+	params := url.Values{}
+	for k, v := range e.QueryParameters {
+		params.Add(k, v)
+	}
+	baseURL.RawQuery = params.Encode()
+	return baseURL.String(), nil
 }
 
 // writeFile writes the content of the file to an io.Writer
@@ -429,7 +567,27 @@ func isBodyJSONSupported(resp *http.Response) bool {
 	return strings.Contains(contentType, "application/json") || strings.HasSuffix(contentType, "+json")
 }
 
+// warnf is venom.Warning; a test replaces it.
+var warnf = venom.Warning
+
+// plainHTTPScheme is the scheme of a request that opens no TLS connection of its own.
+const plainHTTPScheme = "http://"
+
+// warnUnusedTLS warns, once per step, when tls_root_ca, tls_client_cert or tls_client_key is set and the url is http://
+// (any case): those settings only serve TLS connections, which an http:// url still opens for a followed redirect to
+// https:// or through an https:// proxy (ADR-0009, #2385).
+func (e Executor) warnUnusedTLS(ctx context.Context) {
+	if e.TLSRootCA == "" && e.TLSClientCert == "" && e.TLSClientKey == "" {
+		return
+	}
+	if len(e.URL) >= len(plainHTTPScheme) && strings.EqualFold(e.URL[:len(plainHTTPScheme)], plainHTTPScheme) {
+		warnf(ctx, "http: tls_root_ca, tls_client_cert and tls_client_key apply only to TLS connections: the url is http:// (they still serve a redirect to https:// or an https:// proxy)")
+	}
+}
+
 func (e Executor) TLSOptions(ctx context.Context) ([]func(*http.Transport) error, error) {
+	e.warnUnusedTLS(ctx)
+
 	var opts []func(*http.Transport) error
 
 	if e.IgnoreVerifySSL {
@@ -439,59 +597,19 @@ func (e Executor) TLSOptions(ctx context.Context) ([]func(*http.Transport) error
 	workdir := venom.StringVarFromCtx(ctx, "venom.testsuite.workdir")
 
 	if e.TLSRootCA != "" {
-		TLSRootCAFilepath := e.TLSRootCA
-		if !filepath.IsAbs(e.TLSRootCA) {
-			TLSRootCAFilepath = filepath.Join(workdir, e.TLSRootCA)
-		}
-		var TLSRootCA []byte
-		if _, err := os.Stat(TLSRootCAFilepath); err == nil {
-			TLSRootCA, err = os.ReadFile(TLSRootCAFilepath)
-			if err != nil {
-				return nil, fmt.Errorf("unable to read TLSRootCA from file %s", TLSRootCAFilepath)
-			}
-		} else {
-			TLSRootCA = []byte(e.TLSRootCA)
+		TLSRootCA, err := tlsconfig.ReadPEM(workdir, e.TLSRootCA, "TLSRootCA")
+		if err != nil {
+			return nil, err
 		}
 		opts = append(opts, WithTLSRootCA(ctx, TLSRootCA))
 	}
 
-	var TLSClientCert, TLSClientKey []byte
-	if e.TLSClientCert != "" {
-		TLSClientCertFilepath := e.TLSClientCert
-		if !filepath.IsAbs(e.TLSClientCert) {
-			TLSClientCertFilepath = filepath.Join(workdir, e.TLSClientCert)
-		}
-		if _, err := os.Stat(TLSClientCertFilepath); err == nil {
-			TLSClientCert, err = os.ReadFile(TLSClientCertFilepath)
-			if err != nil {
-				return nil, fmt.Errorf("unable to read TLSClientCert from file %s", TLSClientCertFilepath)
-			}
-		} else {
-			TLSClientCert = []byte(e.TLSClientCert)
-		}
+	cert, err := tlsconfig.ClientCertificate(workdir, e.TLSClientCert, e.TLSClientKey)
+	if err != nil {
+		return nil, err
 	}
-
-	if e.TLSClientKey != "" {
-		TLSClientKeyFilepath := e.TLSClientKey
-		if !filepath.IsAbs(e.TLSClientKey) {
-			TLSClientKeyFilepath = filepath.Join(workdir, e.TLSClientKey)
-		}
-		if _, err := os.Stat(TLSClientKeyFilepath); err == nil {
-			TLSClientKey, err = os.ReadFile(TLSClientKeyFilepath)
-			if err != nil {
-				return nil, fmt.Errorf("unable to read TLSClientKey from file %s", TLSClientKeyFilepath)
-			}
-		} else {
-			TLSClientKey = []byte(e.TLSClientKey)
-		}
-	}
-
-	if len(TLSClientCert) > 0 && len(TLSClientKey) > 0 {
-		cert, err := tls.X509KeyPair(TLSClientCert, TLSClientKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse x509 mTLS certificate or key: %s", err)
-		}
-		opts = append(opts, WithTLSClientAuth(cert))
+	if cert != nil {
+		opts = append(opts, WithTLSClientAuth(*cert))
 	}
 
 	return opts, nil

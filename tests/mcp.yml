@@ -1,0 +1,287 @@
+name: MCP executor testsuite
+# Needs the Go toolchain: the first test case builds the reference server (executors/mcp/internal/refserver).
+# Run it from the tests/ directory, like the other suites. No docker, no network.
+# The build goes into a fresh mktemp -d directory (binary, address file and pid file live there), so two runs
+# at once do not collide; the "stop the http server" test case removes the whole directory.
+vars:
+  # A fake bearer token for the reference server, never a credential.
+  token: changeme-venom-mcp-refserver-token
+secrets:
+  - token
+
+testcases:
+- name: build the reference server
+  steps:
+  - type: exec
+    script: |
+      set -e
+      d="$(mktemp -d -t venom-mcp-XXXXXX)"
+      go build -o "$d/refserver" ../executors/mcp/internal/refserver
+      echo "$d"
+    assertions:
+    - result.code ShouldEqual 0
+    vars:
+      dir:
+        from: result.systemout
+        regex: (/\S+)
+
+- name: stdio transport
+  steps:
+  - type: mcp
+    transport: stdio
+    command: ["{{.build-the-reference-server.dir}}/refserver"]
+    method: initialize
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.serverinfo.name ShouldEqual venom-mcp-refserver
+    - result.protocolversion ShouldEqual 2025-11-25
+  - type: mcp
+    transport: stdio
+    command: ["{{.build-the-reference-server.dir}}/refserver"]
+    method: ping
+  - name: tools list (AC-1)
+    type: mcp
+    transport: stdio
+    command: ["{{.build-the-reference-server.dir}}/refserver"]
+    method: tools/list
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.tools ShouldContainSubstring echo
+    - result.tools ShouldContainSubstring fail
+  - name: tools call echo (AC-2)
+    type: mcp
+    transport: stdio
+    command: ["{{.build-the-reference-server.dir}}/refserver"]
+    method: tools/call
+    tool: echo
+    arguments:
+      message: hello
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.text ShouldContainSubstring hello
+    - result.structured ShouldContainSubstring '"length":5'
+    - result.structuredjson.message ShouldEqual hello
+  - name: tools call fail (AC-3)
+    type: mcp
+    transport: stdio
+    command: ["{{.build-the-reference-server.dir}}/refserver"]
+    method: tools/call
+    tool: fail
+    assertions:
+    - result.iserror ShouldBeTrue
+    - result.err ShouldContainSubstring fail
+
+- name: stdio resources and prompts
+  steps:
+  - name: resources list
+    type: mcp
+    transport: stdio
+    command: ["{{.build-the-reference-server.dir}}/refserver"]
+    method: resources/list
+    assertions:
+    - result.err ShouldBeEmpty
+    # The SDK lists resources sorted by uri.
+    - result.resources.resources0.uri ShouldEqual venom://blob/bytes
+    - result.resources.resources0.mimetype ShouldEqual application/octet-stream
+    - result.resources.resources1.uri ShouldEqual venom://text/hello
+    - result.resources.resources1.mimetype ShouldEqual text/plain
+    - result.resources.resources2.uri ShouldEqual venom://text/second
+  - name: resources read text
+    type: mcp
+    transport: stdio
+    command: ["{{.build-the-reference-server.dir}}/refserver"]
+    method: resources/read
+    uri: venom://text/hello
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.text ShouldEqual hello
+    - result.content.content0 ShouldEqual hello
+    - result.resources.resources0.text ShouldEqual hello
+  - name: resources read blob
+    type: mcp
+    transport: stdio
+    command: ["{{.build-the-reference-server.dir}}/refserver"]
+    method: resources/read
+    uri: venom://blob/bytes
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.resources.resources0.blob ShouldEqual AQID
+    - result.resources.resources0.text ShouldBeEmpty
+    - result.text ShouldBeEmpty
+  - name: prompts list
+    type: mcp
+    transport: stdio
+    command: ["{{.build-the-reference-server.dir}}/refserver"]
+    method: prompts/list
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.prompts.prompts0.name ShouldEqual greet
+    - result.prompts.prompts0.arguments.arguments0.name ShouldEqual who
+    - result.prompts.prompts1.name ShouldEqual plain
+  - name: prompts get greet
+    type: mcp
+    transport: stdio
+    command: ["{{.build-the-reference-server.dir}}/refserver"]
+    method: prompts/get
+    prompt: greet
+    arguments:
+      who: venom
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.text ShouldEqual 'hello venom'
+    - result.description ShouldEqual 'A greeting'
+    - result.prompts.prompts0.role ShouldEqual user
+    - result.prompts.prompts0.text ShouldEqual 'hello venom'
+  - name: prompts get plain
+    type: mcp
+    transport: stdio
+    command: ["{{.build-the-reference-server.dir}}/refserver"]
+    method: prompts/get
+    prompt: plain
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.text ShouldEqual plain
+
+- name: start the http server
+  steps:
+  - type: exec
+    script: |
+      rm -f {{.build-the-reference-server.dir}}/addr {{.build-the-reference-server.dir}}/pid
+      MCP_REFSERVER_TOKEN='{{.token}}' nohup {{.build-the-reference-server.dir}}/refserver -http 127.0.0.1:0 -addr-file {{.build-the-reference-server.dir}}/addr -idle-exit 2m >/dev/null 2>&1 &
+      echo $! > {{.build-the-reference-server.dir}}/pid
+      for i in $(seq 1 100); do [ -s {{.build-the-reference-server.dir}}/addr ] && break; sleep 0.1; done
+      [ -s {{.build-the-reference-server.dir}}/addr ]
+    assertions:
+    - result.code ShouldEqual 0
+  - type: readfile
+    path: "{{.build-the-reference-server.dir}}/addr"
+    vars:
+      addr:
+        from: result.content
+    assertions:
+    - result.err ShouldBeEmpty
+
+- name: http transport with the bearer token
+  steps:
+  - type: mcp
+    transport: http
+    url: http://{{.start-the-http-server.addr}}/mcp
+    headers:
+      Authorization: Bearer {{.token}}
+    method: tools/list
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.tools ShouldContainSubstring echo
+  - type: mcp
+    transport: http
+    url: http://{{.start-the-http-server.addr}}/mcp
+    headers:
+      Authorization: Bearer {{.token}}
+    method: tools/call
+    tool: echo
+    arguments:
+      message: over-http
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.text ShouldContainSubstring over-http
+  - name: wrong token
+    type: mcp
+    transport: http
+    url: http://{{.start-the-http-server.addr}}/mcp
+    headers:
+      Authorization: Bearer not-the-token
+    method: tools/list
+    assertions:
+    - result.err ShouldNotBeEmpty
+
+- name: http resources and prompts
+  steps:
+  - name: resources list
+    type: mcp
+    transport: http
+    url: http://{{.start-the-http-server.addr}}/mcp
+    headers:
+      Authorization: Bearer {{.token}}
+    method: resources/list
+    assertions:
+    - result.err ShouldBeEmpty
+    # The SDK lists resources sorted by uri.
+    - result.resources.resources0.uri ShouldEqual venom://blob/bytes
+    - result.resources.resources0.mimetype ShouldEqual application/octet-stream
+    - result.resources.resources1.uri ShouldEqual venom://text/hello
+    - result.resources.resources1.mimetype ShouldEqual text/plain
+    - result.resources.resources2.uri ShouldEqual venom://text/second
+  - name: resources read text
+    type: mcp
+    transport: http
+    url: http://{{.start-the-http-server.addr}}/mcp
+    headers:
+      Authorization: Bearer {{.token}}
+    method: resources/read
+    uri: venom://text/hello
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.text ShouldEqual hello
+    - result.content.content0 ShouldEqual hello
+    - result.resources.resources0.text ShouldEqual hello
+  - name: resources read blob
+    type: mcp
+    transport: http
+    url: http://{{.start-the-http-server.addr}}/mcp
+    headers:
+      Authorization: Bearer {{.token}}
+    method: resources/read
+    uri: venom://blob/bytes
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.resources.resources0.blob ShouldEqual AQID
+    - result.resources.resources0.text ShouldBeEmpty
+    - result.text ShouldBeEmpty
+  - name: prompts list
+    type: mcp
+    transport: http
+    url: http://{{.start-the-http-server.addr}}/mcp
+    headers:
+      Authorization: Bearer {{.token}}
+    method: prompts/list
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.prompts.prompts0.name ShouldEqual greet
+    - result.prompts.prompts0.arguments.arguments0.name ShouldEqual who
+    - result.prompts.prompts1.name ShouldEqual plain
+  - name: prompts get greet
+    type: mcp
+    transport: http
+    url: http://{{.start-the-http-server.addr}}/mcp
+    headers:
+      Authorization: Bearer {{.token}}
+    method: prompts/get
+    prompt: greet
+    arguments:
+      who: venom
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.text ShouldEqual 'hello venom'
+    - result.description ShouldEqual 'A greeting'
+    - result.prompts.prompts0.role ShouldEqual user
+    - result.prompts.prompts0.text ShouldEqual 'hello venom'
+  - name: prompts get plain
+    type: mcp
+    transport: http
+    url: http://{{.start-the-http-server.addr}}/mcp
+    headers:
+      Authorization: Bearer {{.token}}
+    method: prompts/get
+    prompt: plain
+    assertions:
+    - result.err ShouldBeEmpty
+    - result.text ShouldEqual plain
+
+- name: stop the http server
+  steps:
+  - type: exec
+    script: |
+      kill $(cat {{.build-the-reference-server.dir}}/pid) 2>/dev/null || true
+      rm -rf "{{.build-the-reference-server.dir}}"
+    assertions:
+    - result.code ShouldEqual 0

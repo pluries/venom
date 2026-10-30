@@ -1,0 +1,35 @@
+name: strict variables, an unknown variable fails a step only when asked
+testcases:
+# every step spawns a venom sub-process (./venom, as the other suites that do) on a tiny suite in strict_variables/
+- name: without the option a typo is left as written and the suite passes
+  steps:
+  - type: exec
+    script: NO_COLOR=1 ./venom run strict_variables/typo.yml
+    assertions:
+    - result.code ShouldEqual 0
+    - result.systemerr ShouldBeEmpty
+
+- name: with the flag a typo fails the step and names the variable and the step
+  steps:
+  - type: exec
+    script: NO_COLOR=1 ./venom run --strict-variables strict_variables/typo.yml
+    assertions:
+    - result.code ShouldEqual 2
+    - result.systemout ShouldContainSubstring unknown
+    - result.systemout ShouldContainSubstring greting
+
+- name: with the environment variable a typo fails too
+  steps:
+  - type: exec
+    script: NO_COLOR=1 VENOM_STRICT_VARIABLES=true ./venom run strict_variables/typo.yml
+    assertions:
+    - result.code ShouldEqual 2
+    - result.systemout ShouldContainSubstring greting
+
+- name: with the flag, extracted, range, suite, default and ternary forms do not fail
+  steps:
+  - type: exec
+    script: NO_COLOR=1 ./venom run --strict-variables strict_variables/allowed.yml
+    assertions:
+    - result.code ShouldEqual 0
+    - result.systemerr ShouldBeEmpty

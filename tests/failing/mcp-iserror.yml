@@ -1,0 +1,32 @@
+name: MCP tool error fixture
+# Manual fixture, expected to FAIL: a tool that reports an error fails the step with the default assertions.
+# Self-contained: the first test case builds the server into a mktemp -d directory, the last removes it. Run: cd tests && venom run failing/<file>.
+testcases:
+- name: build the reference server
+  steps:
+  - type: exec
+    script: |
+      set -e
+      d="$(mktemp -d -t venom-mcp-XXXXXX)"
+      go build -o "$d/refserver" ../../executors/mcp/internal/refserver
+      echo "$d"
+    assertions:
+    - result.code ShouldEqual 0
+    vars:
+      dir:
+        from: result.systemout
+        regex: (/\S+)
+- name: tool error fails the step
+  steps:
+  - type: mcp
+    transport: stdio
+    command: ["{{.build-the-reference-server.dir}}/refserver"]
+    method: tools/call
+    tool: fail
+
+- name: remove the reference server
+  steps:
+  - type: exec
+    script: rm -rf "{{.build-the-reference-server.dir}}"
+    assertions:
+    - result.code ShouldEqual 0

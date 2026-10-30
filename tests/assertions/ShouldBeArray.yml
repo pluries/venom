@@ -1,0 +1,7 @@
+name: Assertions testsuite
+testcases:
+- name: test assertion ShouldBeArray
+  steps:
+  - script: echo '[1,2,3]'
+    assertions:
+    - result.systemoutjson ShouldBeArray

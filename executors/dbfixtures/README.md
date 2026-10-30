@@ -10,7 +10,7 @@ Please read its documentation for further details about the parameters of this e
 In your yaml file, you declare your step like this
 
 ```yaml
-  - database mandatory [mysql/postgres/sqlite3]
+  - database mandatory [mysql/postgres/sqlite3 (or sqlite); SQLite is the pure Go driver, no cgo]
   - dsn mandatory
   - schemas optional
   - migrations optional

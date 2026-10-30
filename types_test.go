@@ -13,8 +13,7 @@ func Test_RemoveNotPrintableChar(t *testing.T) {
 	}{
 		{
 			name: "remove U+001B escape code (not printable)",
-			// line below contains escapce code U+001B
-			args: args{in: "python-mysqldb : [34mOK[0m"},
+			args: args{in: "python-mysqldb : \x1b[34mOK\x1b[0m"},
 			want: "python-mysqldb :  [34mOK [0m",
 		},
 	}

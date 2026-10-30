@@ -10,6 +10,8 @@ import (
 	"github.com/ovh/venom/executors/http"
 	"github.com/ovh/venom/executors/imap"
 	"github.com/ovh/venom/executors/kafka"
+	"github.com/ovh/venom/executors/mcp"
+	"github.com/ovh/venom/executors/mobile"
 	"github.com/ovh/venom/executors/mongo"
 	"github.com/ovh/venom/executors/mqtt"
 	"github.com/ovh/venom/executors/ovhapi"
@@ -25,7 +27,7 @@ import (
 type Constructor func() venom.Executor
 
 // Registry is a map of executors to executor constructor functions.
-var Registry map[string]Constructor = map[string]Constructor{
+var Registry = map[string]Constructor{
 	amqp.Name:       amqp.New,
 	dbfixtures.Name: dbfixtures.New,
 	exec.Name:       exec.New,
@@ -42,6 +44,8 @@ var Registry map[string]Constructor = map[string]Constructor{
 	sql.Name:        sql.New,
 	ssh.Name:        ssh.New,
 	mongo.Name:      mongo.New,
+	mcp.Name:        mcp.New,
+	mobile.Name:     mobile.New,
 	web.Name:        web.New,
 	couchbase.Name:  couchbase.New,
 }

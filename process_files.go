@@ -6,12 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/mattn/go-zglob"
-	"github.com/rockbears/yaml"
-	yamlv3 "gopkg.in/yaml.v3"
+	"github.com/ovh/venom/internal/yamljson"
+	yamlv3 "go.yaml.in/yaml/v3"
 
 	"github.com/ovh/venom/interpolate"
 	"github.com/pkg/errors"
@@ -24,9 +25,23 @@ type testCaseLineInfo struct {
 	AssertionLines [][]int // [stepIdx][assertIdx] line numbers
 }
 
-// extractLineNumbers parses raw YAML bytes using gopkg.in/yaml.v3 to extract
+// extractLineNumbers parses raw YAML bytes using go.yaml.in/yaml/v3 to extract
 // source line numbers for testcases, steps, and assertions.
 func extractLineNumbers(content []byte) []testCaseLineInfo {
+	testcasesNode := testcasesSequence(content)
+	if testcasesNode == nil {
+		return nil
+	}
+
+	result := make([]testCaseLineInfo, 0, len(testcasesNode.Content))
+	for _, tcNode := range testcasesNode.Content {
+		result = append(result, testCaseLines(tcNode))
+	}
+	return result
+}
+
+// testcasesSequence returns the "testcases" sequence of a suite file, or nil when the file has none.
+func testcasesSequence(content []byte) *yamlv3.Node {
 	var doc yamlv3.Node
 	if err := yamlv3.Unmarshal(content, &doc); err != nil {
 		return nil
@@ -41,68 +56,63 @@ func extractLineNumbers(content []byte) []testCaseLineInfo {
 		return nil
 	}
 
-	// Find "testcases" key in root mapping
-	var testcasesNode *yamlv3.Node
-	for i := 0; i < len(root.Content)-1; i += 2 {
-		if root.Content[i].Value == "testcases" {
-			testcasesNode = root.Content[i+1]
-			break
-		}
-	}
+	testcasesNode := mappingValue(root, "testcases")
 	if testcasesNode == nil || testcasesNode.Kind != yamlv3.SequenceNode {
 		return nil
 	}
+	return testcasesNode
+}
 
-	result := make([]testCaseLineInfo, 0, len(testcasesNode.Content))
-	for _, tcNode := range testcasesNode.Content {
-		if tcNode.Kind != yamlv3.MappingNode {
-			result = append(result, testCaseLineInfo{})
-			continue
-		}
-
-		info := testCaseLineInfo{
-			TestCaseLine: tcNode.Line,
-		}
-
-		// Find "steps" in testcase mapping
-		var stepsNode *yamlv3.Node
-		for i := 0; i < len(tcNode.Content)-1; i += 2 {
-			if tcNode.Content[i].Value == "steps" {
-				stepsNode = tcNode.Content[i+1]
-				break
-			}
-		}
-
-		if stepsNode != nil && stepsNode.Kind == yamlv3.SequenceNode {
-			info.StepLines = make([]int, len(stepsNode.Content))
-			info.AssertionLines = make([][]int, len(stepsNode.Content))
-
-			for stepIdx, stepNode := range stepsNode.Content {
-				info.StepLines[stepIdx] = stepNode.Line
-
-				if stepNode.Kind != yamlv3.MappingNode {
-					continue
-				}
-
-				// Find "assertions" in step mapping
-				for i := 0; i < len(stepNode.Content)-1; i += 2 {
-					if stepNode.Content[i].Value == "assertions" {
-						assertionsNode := stepNode.Content[i+1]
-						if assertionsNode.Kind == yamlv3.SequenceNode {
-							info.AssertionLines[stepIdx] = make([]int, len(assertionsNode.Content))
-							for aIdx, aNode := range assertionsNode.Content {
-								info.AssertionLines[stepIdx][aIdx] = aNode.Line
-							}
-						}
-						break
-					}
-				}
-			}
-		}
-
-		result = append(result, info)
+// testCaseLines returns the line of a testcase node, of its steps and of their assertions.
+func testCaseLines(tcNode *yamlv3.Node) testCaseLineInfo {
+	if tcNode.Kind != yamlv3.MappingNode {
+		return testCaseLineInfo{}
 	}
-	return result
+
+	info := testCaseLineInfo{
+		TestCaseLine: tcNode.Line,
+	}
+
+	stepsNode := mappingValue(tcNode, "steps")
+	if stepsNode == nil || stepsNode.Kind != yamlv3.SequenceNode {
+		return info
+	}
+
+	info.StepLines = make([]int, len(stepsNode.Content))
+	info.AssertionLines = make([][]int, len(stepsNode.Content))
+	for stepIdx, stepNode := range stepsNode.Content {
+		info.StepLines[stepIdx] = stepNode.Line
+		info.AssertionLines[stepIdx] = assertionLines(stepNode)
+	}
+	return info
+}
+
+// assertionLines returns the line of each assertion of a step node, or nil when it has no assertion sequence.
+func assertionLines(stepNode *yamlv3.Node) []int {
+	if stepNode.Kind != yamlv3.MappingNode {
+		return nil
+	}
+
+	assertionsNode := mappingValue(stepNode, "assertions")
+	if assertionsNode == nil || assertionsNode.Kind != yamlv3.SequenceNode {
+		return nil
+	}
+
+	lines := make([]int, len(assertionsNode.Content))
+	for aIdx, aNode := range assertionsNode.Content {
+		lines[aIdx] = aNode.Line
+	}
+	return lines
+}
+
+// mappingValue returns the value node of the first key named key in a mapping node, or nil.
+func mappingValue(mapping *yamlv3.Node, key string) *yamlv3.Node {
+	for i := 0; i < len(mapping.Content)-1; i += 2 {
+		if mapping.Content[i].Value == key {
+			return mapping.Content[i+1]
+		}
+	}
+	return nil
 }
 
 func getFilesPath(path []string) ([]string, error) {
@@ -111,9 +121,9 @@ func getFilesPath(path []string) ([]string, error) {
 	for _, p := range path {
 		p = strings.TrimSpace(p)
 
-		// no need to check err on os.stat.
-		// if we put ./test/*.yml, it will fail and it's normal
-		fileInfo, _ := os.Stat(p)
+		// No need to check err on os.Stat: a glob pattern like ./test/*.yml is a legitimate, common
+		// input here and always makes Stat return an error; only a real directory path is used below.
+		fileInfo, _ := os.Stat(p) //nolint:errcheck // p may be a glob pattern (not a real path), which always errors here by design; only a successful, IsDir() result is acted on
 		if fileInfo != nil && fileInfo.IsDir() {
 			// check if *.yml or *.yaml files exists in the path
 			p = p + string(os.PathSeparator) + "*.y*ml"
@@ -152,111 +162,161 @@ func uniq(stringSlice []string) []string {
 
 func (v *Venom) readFiles(ctx context.Context, filesPath []string) (err error) {
 	for _, filePath := range filesPath {
-		Debug(ctx, "Reading %v", filePath)
-		btes, err := os.ReadFile(filePath)
-		if err != nil {
-			return errors.Wrapf(err, "unable to read file %q", filePath)
-		}
-
-		varCloned := v.variables.Clone()
-
-		fromPartial, err := getVarFromPartialYML(ctx, btes)
-		if err != nil {
-			return errors.Wrapf(err, "unable to get vars from file %q", filePath)
-		}
-
-		var varsFromPartial map[string]string
-		if len(fromPartial) > 0 {
-			varsFromPartial, err = DumpStringPreserveCase(fromPartial)
-			if err != nil {
-				return errors.Wrapf(err, "unable to parse variables")
-			}
-		}
-
-		// we take default vars from the testsuite, only if it's not already is global vars
-		for k, value := range varsFromPartial {
-			if k == "" {
-				continue
-			}
-			if _, ok := varCloned[k]; !ok || (varCloned[k] == "{}" && varCloned["__Len__"] == "0") {
-				// we interpolate the value of vars here, to do it only once per ts
-				valueInterpolated, err := interpolate.Do(value, varsFromPartial)
-				if err != nil {
-					return errors.Wrapf(err, "unable to parse variable %q", k)
-				}
-				varCloned.Add(k, valueInterpolated)
-			}
-		}
-
-		var vars map[string]string
-		if len(varCloned) > 0 {
-			vars, err = DumpStringPreserveCase(varCloned)
-			if err != nil {
-				return errors.Wrapf(err, "unable to parse variables")
-			}
-		}
-
-		content, err := interpolate.Do(string(btes), vars)
+		ts, err := v.readFile(ctx, filePath)
 		if err != nil {
 			return err
 		}
-
-		var testSuiteInput TestSuiteInput
-		if err := yaml.Unmarshal([]byte(content), &testSuiteInput); err != nil {
-			Error(context.Background(), "file content: %s", content)
-			return errors.Wrapf(err, "error while unmarshal file %q", filePath)
-		}
-
-		ts := TestSuite{
-			Name:        testSuiteInput.Name,
-			Description: testSuiteInput.Description,
-			TestCases:   make([]TestCase, len(testSuiteInput.TestCases)),
-			Vars:        testSuiteInput.Vars,
-			Secrets:     testSuiteInput.Secrets,
-		}
-
-		// Extract source line numbers from original YAML (before interpolation)
-		lineInfos := extractLineNumbers(btes)
-
-		for i := range testSuiteInput.TestCases {
-			ts.TestCases[i] = TestCase{
-				TestCaseInput: testSuiteInput.TestCases[i],
-			}
-			if i < len(lineInfos) {
-				ts.TestCases[i].SourceLine = lineInfos[i].TestCaseLine
-				ts.TestCases[i].StepSourceLines = lineInfos[i].StepLines
-				ts.TestCases[i].AssertionSourceLines = lineInfos[i].AssertionLines
-			}
-		}
-		Info(ctx, "Has %d Secrets", len(ts.Secrets))
-
-		// Default workdir is testsuite directory
-		ts.WorkDir, err = filepath.Abs(filepath.Dir(filePath))
-		if runtime.GOOS == "windows" {
-			// Replace backslashes with forward slashes for Windows
-			ts.WorkDir = strings.ReplaceAll(ts.WorkDir, "\\", "/")
-		}
-		if err != nil {
-			return errors.Wrapf(err, "Unable to get testsuite's working directory")
-		}
-
-		// ../foo/a.yml
-		ts.Filepath = filePath
-		// a
-		ts.ShortName = strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
-		// a.yml
-		ts.Filename = filepath.Base(filePath)
-		ts.Vars = varCloned
-
-		ts.Vars.Add("venom.testsuite.workdir", ts.WorkDir)
-		ts.Vars.Add("venom.testsuite.name", ts.Name)
-		ts.Vars.Add("venom.testsuite.shortName", ts.ShortName)
-		ts.Vars.Add("venom.testsuite.filename", ts.Filename)
-		ts.Vars.Add("venom.testsuite.filepath", ts.Filepath)
-		ts.Vars.Add("venom.datetime", time.Now().Format(time.RFC3339))
-		ts.Vars.Add("venom.timestamp", fmt.Sprintf("%d", time.Now().Unix()))
-
 		v.Tests.TestSuites = append(v.Tests.TestSuites, ts)
 	}
 	return nil
+}
+
+// readFile reads, interpolates and unmarshals one suite file into a TestSuite.
+func (v *Venom) readFile(ctx context.Context, filePath string) (TestSuite, error) {
+	Debug(ctx, "Reading %v", filePath)
+	btes, err := os.ReadFile(filePath)
+	if err != nil {
+		return TestSuite{}, errors.Wrapf(err, "unable to read file %q", filePath)
+	}
+
+	varCloned, err := v.suiteVars(ctx, filePath, btes)
+	if err != nil {
+		return TestSuite{}, err
+	}
+
+	var vars map[string]string
+	if len(varCloned) > 0 {
+		vars, err = DumpStringPreserveCase(varCloned)
+		if err != nil {
+			return TestSuite{}, errors.Wrapf(err, "unable to parse variables")
+		}
+	}
+
+	content, err := interpolate.Do(string(btes), vars)
+	if err != nil {
+		return TestSuite{}, err
+	}
+
+	var testSuiteInput TestSuiteInput
+	if err := yamljson.Unmarshal([]byte(content), &testSuiteInput); err != nil {
+		Error(context.Background(), "file %q is not valid YAML after interpolation; its content is not logged as it may hold secrets", filePath)
+		return TestSuite{}, errors.Wrapf(err, "error while unmarshal file %q", filePath)
+	}
+
+	ts := TestSuite{
+		Name:        testSuiteInput.Name,
+		Description: testSuiteInput.Description,
+		TestCases:   testCasesWithLines(testSuiteInput.TestCases, btes),
+		Vars:        testSuiteInput.Vars,
+		Secrets:     mergeSecretNames(testSuiteInput.Secrets, v.runSecrets),
+	}
+	Info(ctx, "Has %d Secrets", len(ts.Secrets))
+
+	if err := setSuiteLocation(&ts, filePath); err != nil {
+		return TestSuite{}, err
+	}
+	ts.Vars = varCloned
+	addSuiteVars(&ts)
+	return ts, nil
+}
+
+// mergeSecretNames returns the secret names of a suite: its own names, then the run-level ones (AddRunSecrets) it does
+// not declare already, each once. Without a run-level name the suite's own list is returned untouched.
+func mergeSecretNames(own, run []string) []string {
+	if len(run) == 0 {
+		return own
+	}
+	merged := make([]string, 0, len(own)+len(run))
+	merged = append(merged, own...)
+	for _, name := range run {
+		if !slices.Contains(merged, name) {
+			merged = append(merged, name)
+		}
+	}
+	return merged
+}
+
+// suiteVars returns the run vars completed by the vars the suite file declares.
+func (v *Venom) suiteVars(ctx context.Context, filePath string, btes []byte) (H, error) {
+	varCloned := v.variables.Clone()
+
+	fromPartial, err := getVarFromPartialYML(ctx, btes)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to get vars from file %q", filePath)
+	}
+
+	var varsFromPartial map[string]string
+	if len(fromPartial) > 0 {
+		varsFromPartial, err = DumpStringPreserveCase(fromPartial)
+		if err != nil {
+			return nil, errors.Wrapf(err, "unable to parse variables")
+		}
+	}
+
+	// we take default vars from the testsuite, only if it's not already is global vars
+	for k, value := range varsFromPartial {
+		if k == "" {
+			continue
+		}
+		if _, ok := varCloned[k]; !ok || (varCloned[k] == "{}" && varCloned["__Len__"] == "0") {
+			// we interpolate the value of vars here, to do it only once per ts
+			valueInterpolated, err := interpolateSuiteVar(k, value, varsFromPartial)
+			if err != nil {
+				return nil, errors.Wrapf(err, "unable to parse variable %q", k)
+			}
+			varCloned.Add(k, valueInterpolated)
+		}
+	}
+	return varCloned, nil
+}
+
+// testCasesWithLines builds the suite's testcases with their source lines, read before interpolation.
+func testCasesWithLines(inputs []TestCaseInput, btes []byte) []TestCase {
+	testCases := make([]TestCase, len(inputs))
+	lineInfos := extractLineNumbers(btes)
+
+	for i := range inputs {
+		testCases[i] = TestCase{
+			TestCaseInput: inputs[i],
+		}
+		if i < len(lineInfos) {
+			testCases[i].SourceLine = lineInfos[i].TestCaseLine
+			testCases[i].StepSourceLines = lineInfos[i].StepLines
+			testCases[i].AssertionSourceLines = lineInfos[i].AssertionLines
+		}
+	}
+	return testCases
+}
+
+// setSuiteLocation sets the suite's working directory and file names from its path.
+func setSuiteLocation(ts *TestSuite, filePath string) error {
+	var err error
+	// Default workdir is testsuite directory
+	ts.WorkDir, err = filepath.Abs(filepath.Dir(filePath))
+	if runtime.GOOS == "windows" {
+		// Replace backslashes with forward slashes for Windows
+		ts.WorkDir = strings.ReplaceAll(ts.WorkDir, "\\", "/")
+	}
+	if err != nil {
+		return errors.Wrapf(err, "Unable to get testsuite's working directory")
+	}
+
+	// ../foo/a.yml
+	ts.Filepath = filePath
+	// a
+	ts.ShortName = strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+	// a.yml
+	ts.Filename = filepath.Base(filePath)
+	return nil
+}
+
+// addSuiteVars adds the venom.testsuite.* and time vars to the suite's vars.
+func addSuiteVars(ts *TestSuite) {
+	ts.Vars.Add("venom.testsuite.workdir", ts.WorkDir)
+	ts.Vars.Add("venom.testsuite.name", ts.Name)
+	ts.Vars.Add("venom.testsuite.shortName", ts.ShortName)
+	ts.Vars.Add("venom.testsuite.filename", ts.Filename)
+	ts.Vars.Add("venom.testsuite.filepath", ts.Filepath)
+	ts.Vars.Add("venom.datetime", time.Now().Format(time.RFC3339))
+	ts.Vars.Add("venom.timestamp", fmt.Sprintf("%d", time.Now().Unix()))
 }

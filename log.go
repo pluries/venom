@@ -3,16 +3,18 @@ package venom
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
+	"maps"
+	"net/url"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/gosimple/slug"
 	"github.com/sirupsen/logrus"
 )
 
-func InitTestLogger(t *testing.T) {
+func InitTestLogger(_ *testing.T) {
 	l := logrus.New()
 	logger = logrus.NewEntry(l)
 }
@@ -22,24 +24,26 @@ var (
 	fields = []string{"testsuite", "testcase", "step", "executor"}
 )
 
+// fieldsFromContext returns the log fields keys read from ctx, each cleaned of the context's secrets: a test case name
+// may hold one. A field without a secret keeps its value and type.
 func fieldsFromContext(ctx context.Context, keys ...string) logrus.Fields {
 	fields := logrus.Fields{}
 	if ctx == nil {
 		return fields
 	}
+	secrets := contextSecrets(ctx)
 	for _, k := range keys {
 		ck := ContextKey(k)
 		i := ctx.Value(ck)
-		if i != nil {
-			fields[k] = i
+		if i == nil {
+			continue
 		}
+		if len(secrets) > 0 {
+			i = redactLogArg(secrets, i)
+		}
+		fields[k] = i
 	}
 	return fields
-}
-
-func asJsonString(i interface{}) string {
-	btes, _ := json.Marshal(i)
-	return string(btes)
 }
 
 // HideSensitive replace the value with __hidden__
@@ -75,38 +79,67 @@ func secretKeySet(secretKeys []string) map[string]struct{} {
 	return set
 }
 
+// contextSecrets returns the secret values ctx holds, nil when it holds none.
+func contextSecrets(ctx context.Context) []string {
+	if ctx == nil {
+		return nil
+	}
+	if secrets, ok := ctx.Value(ContextKey("secrets")).([]string); ok {
+		return secrets
+	}
+	return nil
+}
+
+// redactMapVars hides the secrets of a report's variables in place. A variable named in secretKeys is replaced whole;
+// a venom.* value is cleaned of secrets and replaced only when one was found, so its type is kept (numbers stay
+// numbers); any other value is cleaned and becomes a string. Keys are cleaned too: a key holding a secret, such as a
+// computed variable prefixed with a test case name, is renamed.
 func redactMapVars(ctx context.Context, vars H, secretKeys []string) {
 	if len(vars) == 0 || len(secretKeys) == 0 {
 		return
 	}
+	secrets := contextSecrets(ctx)
 	secretSet := secretKeySet(secretKeys)
-	for k, val := range vars {
+	redactKeys(vars, secrets, func(k string, val interface{}) interface{} {
 		if strings.HasPrefix(k, "venom.") {
-			continue
+			return redactLogArg(secrets, val)
 		}
 		if _, ok := secretSet[k]; ok {
-			vars[k] = "__hidden__"
-			continue
+			return "__hidden__"
 		}
-		vars[k] = HideSensitive(ctx, val)
-	}
+		return HideSensitive(ctx, val)
+	})
 }
 
+// redactStringMap is redactMapVars for string values.
 func redactStringMap(ctx context.Context, vars map[string]string, secretKeys []string) {
 	if len(vars) == 0 || len(secretKeys) == 0 {
 		return
 	}
 	secretSet := secretKeySet(secretKeys)
-	for k, val := range vars {
-		if strings.HasPrefix(k, "venom.") {
-			continue
+	redactKeys(vars, contextSecrets(ctx), func(k, val string) string {
+		if _, ok := secretSet[k]; ok && !strings.HasPrefix(k, "venom.") {
+			return "__hidden__"
 		}
-		if _, ok := secretSet[k]; ok {
-			vars[k] = "__hidden__"
-			continue
-		}
-		vars[k] = HideSensitive(ctx, val)
+		return HideSensitive(ctx, val)
+	})
+}
+
+// redactKeys rewrites vars in place: every key cleaned of secrets, every value passed through value with its original
+// key. Keys are walked in sorted order, so when a cleaned key meets another key, the one that sorts last wins whatever
+// the map iteration order.
+func redactKeys[V any](vars map[string]V, secrets []string, value func(k string, val V) V) {
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		keys = append(keys, k)
 	}
+	sort.Strings(keys)
+	out := make(map[string]V, len(vars))
+	for _, k := range keys {
+		out[replaceSecrets(k, secrets)] = value(k, vars[k])
+	}
+	clear(vars)
+	maps.Copy(vars, out)
 }
 
 func redactLogArgs(ctx context.Context, args ...interface{}) []interface{} {
@@ -157,8 +190,10 @@ func hideSensitiveBytes(ctx context.Context, data interface{}) []byte {
 	}
 }
 
+// minSlugSecret is the shortest slug form of a secret appendDerivedSecrets registers.
+const minSlugSecret = 4
+
 func appendDerivedSecrets(secrets []string, seen map[string]struct{}, vars H, secretKeys []string) []string {
-	secretSet := secretKeySet(secretKeys)
 	add := func(value string) {
 		if value == "" {
 			return
@@ -171,21 +206,39 @@ func appendDerivedSecrets(secrets []string, seen map[string]struct{}, vars H, se
 	}
 
 	for _, key := range secretKeys {
-		val := fmt.Sprint(vars[key])
-		if val != "" && val != "<nil>" {
-			add(base64.StdEncoding.EncodeToString([]byte(val)))
+		for _, form := range derivedForms(fmt.Sprint(vars[key])) {
+			add(form)
 		}
 	}
 
-	if _, ok := secretSet["basic_auth_password"]; ok {
-		user := fmt.Sprint(vars["basic_auth_user"])
+	if _, ok := secretKeySet(secretKeys)["basic_auth_password"]; ok {
 		pass := fmt.Sprint(vars["basic_auth_password"])
 		if pass != "" && pass != "<nil>" {
-			add(base64.StdEncoding.EncodeToString([]byte(user + ":" + pass)))
+			add(base64.StdEncoding.EncodeToString([]byte(fmt.Sprint(vars["basic_auth_user"]) + ":" + pass)))
 		}
 	}
 
 	return secrets
+}
+
+// derivedForms returns the forms other than the value itself in which a secret value can reach a report or a line:
+// base64, the slug and the two URL-encoded forms. A form shorter than minSlugSecret is left out where it would blank
+// common fragments of every text (the slug and URL forms), and a form equal to the value is not repeated.
+func derivedForms(val string) []string {
+	if val == "" || val == "<nil>" {
+		return nil
+	}
+	forms := []string{base64.StdEncoding.EncodeToString([]byte(val))}
+	// Test case names are turned into slugs when the suite is parsed (parseTestCases), so a secret holding
+	// characters the slug changes would only appear there in its slug form (#2132).
+	// A secret sent in an URL travels percent-encoded, in the query form ("+" for a space) or the path form
+	// ("%20") (#2302).
+	for _, form := range []string{slug.Make(val), url.QueryEscape(val), url.PathEscape(val)} {
+		if len(form) >= minSlugSecret {
+			forms = append(forms, form)
+		}
+	}
+	return forms
 }
 
 func Debug(ctx context.Context, format string, args ...interface{}) {

@@ -2,6 +2,8 @@
 
 Step used to execute a script
 
+The script runs with the rights of the user running venom. Do not put a step's result or any untrusted value into it without quoting: see Trust model in the [root README](../../README.md#trust-model).
+
 
 ## Input
 

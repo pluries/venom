@@ -1,10 +1,10 @@
 name: DBFixtures integration testsuite
 vars:
-  mysqlHost: 'localhost'
+  mysqlHost: '{{.stackHost}}'
   mysqlPort: '13306'
   mysqlUser: venom
   mysqlPassword: venom
-  pgHost: 'localhost'
+  pgHost: '{{.stackHost}}'
   pgPort: '15432'
   pgUser: venom
   pgPassword: venom

@@ -1,6 +1,6 @@
 name: gRPC TLS Tests
 vars:
-  serviceHost: "localhost:50051"
+  serviceHost: "{{.stackHost}}:50051"
 
 testcases:
 
@@ -8,7 +8,7 @@ testcases:
     steps:
       -
         type: grpc
-        url: {{.serviceHost}}
+        url: "{{.serviceHost}}"
         service: helloworld.Greeter
         method: SayHello
         data:

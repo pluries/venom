@@ -380,7 +380,8 @@ func TestExecutor_QoSLevels(t *testing.T) {
 				QOS:     tt.qos,
 			}
 			assert.Equal(t, tt.qos, msg.QOS)
-			assert.True(t, msg.QOS >= 0 && msg.QOS <= 2, "QoS should be between 0 and 2")
+			// QOS is a byte (unsigned): ">= 0" is a tautology, not a check (staticcheck SA4003).
+			assert.LessOrEqual(t, msg.QOS, byte(2), "QoS should be 0, 1 or 2")
 		})
 	}
 }

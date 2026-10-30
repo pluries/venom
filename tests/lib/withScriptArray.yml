@@ -1,0 +1,11 @@
+executor: withScriptArray
+input:
+  script: []
+
+steps:
+- script: echo '{{.input.script}}'
+  vars:
+    systemout:
+      from: result.systemout
+output:
+  lines: "{{.systemout}}"

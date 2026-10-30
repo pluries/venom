@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/user"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +14,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/ovh/venom"
+	"github.com/ovh/venom/executors/internal/sshconn"
 )
 
 // Name for test ssh
@@ -38,6 +37,12 @@ type Executor struct {
 	PrivateKey   string `json:"privatekey,omitempty" yaml:"privatekey,omitempty"`
 	Sudo         string `json:"sudo,omitempty" yaml:"sudo,omitempty"`
 	SudoPassword string `json:"sudopassword,omitempty" yaml:"sudopassword,omitempty"`
+	// KnownHosts is the path of an OpenSSH known_hosts file the host's key is checked against; relative to the suite.
+	// A pointer, like HostKey, so that a key set to nothing is told from a key not set: the first is an error, not
+	// the unchecked default.
+	KnownHosts *string `json:"knownhosts,omitempty" yaml:"knownhosts,omitempty"`
+	// HostKey is the one public key, in authorized_keys format, the host must present. Exclusive with KnownHosts.
+	HostKey *string `json:"hostkey,omitempty" yaml:"hostkey,omitempty"`
 }
 
 // Result represents a step result
@@ -67,13 +72,13 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 	}
 
 	if e.Command == "" {
-		return nil, fmt.Errorf("Invalid command")
+		return nil, fmt.Errorf("invalid command")
 	}
 
 	start := time.Now()
 	result := Result{}
 
-	client, session, err := connectToHost(e.User, e.Password, e.PrivateKey, e.Host, e.Sudo)
+	client, session, err := e.connect(ctx)
 	if err != nil {
 		result.Err = err.Error()
 	} else {
@@ -83,7 +88,10 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 
 		session.Stderr = stderr
 		session.Stdout = stdout
-		stdin, _ := session.StdinPipe()
+		// StdinPipe's only error cases are session.Stdin already set or the session already started
+		// (golang.org/x/crypto/ssh); neither happens here: session.Stdin is never assigned and Run
+		// has not been called yet.
+		stdin, _ := session.StdinPipe() //nolint:errcheck // verified above: cannot fail at this call site
 
 		// Handle sudo password
 		command := e.Command
@@ -93,7 +101,7 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 			if e.SudoPassword == "" {
 				e.SudoPassword = e.Password
 			}
-			go handleSudo(stdin, stdout, quit, e.SudoPassword)
+			go handleSudo(ctx, stdin, stdout, quit, e.SudoPassword)
 		}
 
 		if err := session.Run(command); err != nil {
@@ -124,7 +132,7 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 	return result, nil
 }
 
-func handleSudo(in io.Writer, out *Buffer, quit chan bool, password string) {
+func handleSudo(ctx context.Context, in io.Writer, out *Buffer, quit chan bool, password string) {
 	sudopromptlen := len(sudoprompt)
 	for {
 		select {
@@ -136,14 +144,45 @@ func handleSudo(in io.Writer, out *Buffer, quit chan bool, password string) {
 
 			// Check if we have to enter password
 			if bufferLen >= sudopromptlen && strings.Contains(content[bufferLen-sudopromptlen:], sudoprompt) {
-				in.Write([]byte(password + "\n"))
+				if _, err := in.Write([]byte(password + "\n")); err != nil {
+					// Best-effort: session.Run surfaces the failure itself; this warning gives the why.
+					// No return: Run always sends on the unbuffered quit, so this loop must stay to receive it.
+					venom.Warning(ctx, "sudo: failed to write password to stdin: %v", err)
+				}
 				out.Truncate(0)
 			}
 		}
 	}
 }
 
-func connectToHost(u, pass, key, host, sudo string) (*ssh.Client, *ssh.Session, error) {
+// connect opens a session on the step's host, checking the host's key the way the step asks. A host-key setting it
+// cannot use (both keys set, a key set but empty, an unreadable file, an unparsable key) is an error before dialing,
+// reported like an unreadable privatekey.
+func (e Executor) connect(ctx context.Context) (*ssh.Client, *ssh.Session, error) {
+	check, err := e.newHostKeyCheck(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return connectToHost(e.User, e.Password, e.PrivateKey, e.Host, e.Sudo, check)
+}
+
+// warnf is venom.Warn; a test replaces it. The warning is limited to one per run by sshconn (#2298).
+var warnf = venom.Warn
+
+// resetInsecureWarning re-arms the warning, for tests only.
+func resetInsecureWarning() { sshconn.ResetInsecureWarning() }
+
+// newHostKeyCheck returns the check the step asks for (see sshconn.NewHostKeyCheck).
+func (e Executor) newHostKeyCheck(ctx context.Context) (sshconn.HostKeyCheck, error) {
+	return sshconn.NewHostKeyCheck(sshconn.HostKeySettings{
+		KnownHosts: e.KnownHosts,
+		HostKey:    e.HostKey,
+		Workdir:    venom.StringVarFromCtx(ctx, "venom.testsuite.workdir"),
+		Host:       e.Host,
+	}, func(format string, args ...any) { warnf(ctx, format, args...) })
+}
+
+func connectToHost(u, pass, key, host, sudo string, check sshconn.HostKeyCheck) (*ssh.Client, *ssh.Session, error) {
 	// Default user is current username
 	if u == "" {
 		osUser, err := user.Current()
@@ -159,26 +198,15 @@ func connectToHost(u, pass, key, host, sudo string) (*ssh.Client, *ssh.Session, 
 		auth = []ssh.AuthMethod{ssh.Password(pass)}
 	} else {
 		// Load the the private key
-		key, err := privateKey(key)
+		key, err := sshconn.PrivateKey(key, "")
 		if err != nil {
 			return nil, nil, err
 		}
 		auth = []ssh.AuthMethod{ssh.PublicKeys(key)}
 	}
 
-	sshConfig := &ssh.ClientConfig{
-		User:            u,
-		Auth:            auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-	}
-
-	// If host doen't contain port, set the default port
-	if !strings.Contains(host, ":") {
-		host += ":22"
-	}
-
 	// Open the tcp connection
-	client, err := ssh.Dial("tcp", host, sshConfig)
+	client, err := sshconn.Dial(host, u, auth, check)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -203,29 +231,4 @@ func connectToHost(u, pass, key, host, sudo string) (*ssh.Client, *ssh.Session, 
 	}
 
 	return client, session, nil
-}
-
-func privateKey(file string) (key ssh.Signer, err error) {
-	// Default private key is $HOME/.ssh/id_rsa
-	if file == "" {
-		usr, err := user.Current()
-		if err != nil {
-			return nil, err
-		}
-		file = filepath.Join(usr.HomeDir + "/.ssh/id_rsa")
-	} else {
-		file = os.ExpandEnv(file)
-	}
-
-	// Read the file
-	buf, err := os.ReadFile(file)
-	if err != nil {
-		return nil, err
-	}
-	// Parse it
-	key, err = ssh.ParsePrivateKey(buf)
-	if err != nil {
-		return nil, err
-	}
-	return key, nil
 }

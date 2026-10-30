@@ -1,6 +1,6 @@
 name: MQTT testsuite
 vars:
-  addrs: 'tcp://localhost:1883'
+  addrs: 'tcp://{{.stackHost}}:1883'
   topic: "venom/mqtt_test/topic"
   clientId: "client-subscriber-test"
 

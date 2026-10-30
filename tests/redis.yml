@@ -1,6 +1,6 @@
 name: Redis testsuite
 vars:
-  redisHost: 'localhost'
+  redisHost: '{{.stackHost}}'
   redisPort: '16379'    
   redis.dialURL: "redis://{{.redisHost}}:{{.redisPort}}/0"
 
