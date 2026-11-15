@@ -97,7 +97,7 @@ build_info() {
   if [ "$base" != "${STUB_GO_BAD_FILE:-}" ] || [ "${STUB_GO_BAD_KIND:-}" != "trimpath" ]; then
     printf '\\tbuild\\t-trimpath=true\\n'
   fi
-  # The real go version -m records no -ldflags and no -X value (the finding of the first rehearsal, build #3).
+  # The real go version -m records no -ldflags and no -X value (the finding of the first live run, build #3).
   # STUB_GO_PRINT_VERSION_LINE plants a Version= line anyway, to prove the check does not read it.
   if [ -n "${STUB_GO_PRINT_VERSION_LINE:-}" ]; then
     printf '\\tbuild\\t-ldflags="-X github.com/ovh/venom.Version=%s"\\n' "${STUB_GO_PRINT_VERSION_LINE}"

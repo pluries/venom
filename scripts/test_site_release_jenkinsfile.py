@@ -126,7 +126,7 @@ class ReleaseJenkinsfile(unittest.TestCase):
         cls.stages = stages_of(cls.code)
 
     def test_every_backslash_of_the_jenkinsfile_is_doubled_because_groovy_reads_escapes(self):
-        """D-058, D-059 (found by the first rehearsal run): Groovy processes backslash escapes in a single-quoted string, so a
+        """D-058, D-059 (found by the first live run): Groovy processes backslash escapes in a single-quoted string, so a
         PowerShell path such as Cert:, backslash, CurrentUser must be written with doubled backslashes; one backslash is an
         illegal escape and Jenkins refuses the whole file before any stage runs. Text guards cannot compile Groovy, so every
         backslash must belong to a doubled pair."""
@@ -150,7 +150,7 @@ class ReleaseJenkinsfile(unittest.TestCase):
         for node in re.findall(r"\bnode\s*\(([^)]*)\)", code):
             self.assertIn(node.strip(), ("'docker-e2e'", "'windows-sign'"))
         self.assertNotRegex(code, r"\bagent\s+any\b")
-        self.assertTrue(re.search(r"\binput\s*\{", stage(code, "Approve")), "Approve has no input directive")
+        self.assertTrue(re.search(r"\binput\s*\(\s*id\s*:\s*'approve'", stage(code, "Approve")), "Approve has no input step")
         self.assertNotRegex(stage(code, "Approve"), r"agent\s*\{")
         self.assertRegex(stage(code, "Approve"), r"agent\s+none")
         self.assertRegex(stage(code, "Resolve"), r"agent\s+none")
@@ -178,6 +178,7 @@ class ReleaseJenkinsfile(unittest.TestCase):
         """Task T050, D-058: the Windows pause input sign-windows is gone; confirm-tag and approve are the only stage
         inputs. Owner decision after the live builds #3 and #4: signerLoop adds one dynamic input, retry-signer-*."""
         directive = re.findall(r"\binput\s*\{[^}]*?\bid\s+'([^']+)'", self.code, flags=re.S)
+        self.assertEqual([], directive, "D-073: no declarative input directive; its message was evaluated before the run set the tag")
         step = re.findall(r"\binput\s*\(\s*id\s*:\s*['\"]([^'\"]+)['\"]", self.code)
         ids = directive + step
         self.assertEqual(["approve"], [i for i in ids if i == "approve"])
@@ -275,12 +276,19 @@ class ReleaseJenkinsfile(unittest.TestCase):
         self.assertIsNotNone(signer_loop(self.code), "no signerLoop helper")
         self.assertEqual(1, len(re.findall(r"timeout\(time:\s*24,\s*unit:\s*'HOURS'\)", self.code.replace(signer_loop(self.code), ""))))
         self.assertRegex(body, r"timeout\(time:\s*24,\s*unit:\s*'HOURS'\)")
-        inp = block_after(body, r"\binput\s*\{")
-        self.assertNotRegex(inp, r"\bsubmitter\s", "D-071: any user may approve, so no submitter restriction")
-        self.assertRegex(inp, r"\bsubmitterParameter\s+'APPROVED_BY'")
-        message = re.search(r"\bmessage\s+\"([^\"]*)\"", inp).group(1)
+        self.assertIsNone(re.search(r"\binput\s*\{", body), "D-073: a scripted input, not a directive")
+        call = re.search(r"\binput\s*\(\s*id\s*:\s*'approve'([^\n]*)\)", body)
+        self.assertIsNotNone(call, "no input(id: 'approve', ...)")
+        args = call.group(1)
+        self.assertNotRegex(args, r"\bsubmitter\s*:", "D-071: any user may approve, so no submitter restriction")
+        self.assertRegex(args, r"submitterParameter\s*:\s*'APPROVED_BY'")
+        message = re.search(r"\bmessage\s*:\s*\"([^\"]*)\"", args).group(1)
         self.assertIn("${env.RELEASE_SHA}", message)
         self.assertIn("${env.RELEASE_TAG}", message)
+        self.assertIn("script {", body, "the input runs inside script { }, so the message is built when the stage runs")
+        self.assertRegex(body, r"instanceof\s+Map")
+        self.assertNotIn("beforeInput", body)
+        self.assertIsNone(re.search(r"(?m)^\s*submitterParameter\s+'", body), "no directive-style submitterParameter")
 
     def test_any_signed_in_user_may_approve_the_list_is_the_explicit_wildcard_and_no_input_restricts_the_submitter(self):
         """D-071 (the maker, solo, one Jenkins account): no approver literal and no submitter restriction on any input;
@@ -300,7 +308,7 @@ class ReleaseJenkinsfile(unittest.TestCase):
         self.assertEqual(1, len(found))
         self.assertGreater(found[0][1], approve_at)
         self.assertIn('rs check-approver "$RELEASE_APPROVED_BY"', stage(self.code, "Draft and publish"))
-        self.assertIn("env.RELEASE_APPROVED_BY = env.APPROVED_BY", stage(self.code, "Approve"))
+        self.assertRegex(stage(self.code, "Approve"), r"env\.RELEASE_APPROVED_BY\s*=\s*\(who instanceof Map\)")
 
     def test_each_credential_is_bound_only_in_its_stage(self):
         where = {}
@@ -315,8 +323,8 @@ class ReleaseJenkinsfile(unittest.TestCase):
         for name in ("Build", "Resign sums", "Seal", "Checks"):
             self.assertNotIn("withCredentials", stage(self.code, name), name)
             self.assertNotIn("credentials", stage(self.code, name).lower(), name)
-        self.assertEqual(5, len(re.findall(r"credentialsId\s*:", self.code)), "the token four times, the registry once")
-        self.assertEqual(5, len(re.findall(r"\bwithCredentials\s*\(", self.code)), "claim, publish, image, cleanup, withdraw")
+        self.assertEqual(6, len(re.findall(r"credentialsId\s*:", self.code)), "the token four times, the registry once, the Discord webhook once")
+        self.assertEqual(6, len(re.findall(r"\bwithCredentials\s*\(", self.code)), "claim, publish, image, cleanup, withdraw, notify")
 
     def test_the_certificate_pin_and_the_timestamp_url_are_constants_and_the_minisign_constants_are_gone(self):
         """D-059: RELEASE_TSA_URL is the plain-http Certum timestamp server (it does not speak https); no minisign URL, hash or key fingerprint is left."""
@@ -652,6 +660,54 @@ class ReleaseJenkinsfile(unittest.TestCase):
         self.assertIn("params.WITHDRAW_REASON", resolve)
         self.assertIn("archiveArtifacts", body)
         self.assertIn("docs/release", body)
+
+    def helper_body(self, signature: str):
+        m = re.search(r"(?m)^def " + signature + r"\s*\{", self.code)
+        return None if not m else self.code[m.end():match_brace(self.code, m.end() - 1)]
+
+    def test_notify_posts_through_one_credential_bound_in_one_helper_and_never_fails_the_build(self):
+        """D-072: a Discord message when the run waits for the maker. The webhook is the secret-text credential
+        venom-discord-webhook, bound only in notifyOnAgent, inside catchError so a missing credential or a dead
+        Discord never fails or aborts the run; the text goes to the script through an environment variable."""
+        agent_side = self.helper_body(r"notifyOnAgent\(String text\)")
+        self.assertIsNotNone(agent_side, "no def notifyOnAgent(String text)")
+        self.assertEqual(1, self.code.count("venom-discord-webhook"))
+        self.assertIn("venom-discord-webhook", agent_side)
+        self.assertRegex(agent_side, r"catchError\s*\(")
+        self.assertLess(agent_side.index("catchError"), agent_side.index("withCredentials"))
+        self.assertRegex(agent_side, r"string\(credentialsId:\s*'venom-discord-webhook',\s*variable:\s*'DISCORD_WEBHOOK'\)")
+        self.assertIn('release-steps.sh" notify "$NOTIFY_TEXT"', agent_side)
+        self.assertRegex(agent_side, r"NOTIFY_TEXT=")
+        self.assertNotRegex(agent_side, r"(sh|echo)\([^)]*\$\{?text", "the text must not be interpolated into the shell")
+        wrapper = self.helper_body(r"notify\(String text\)")
+        self.assertIsNotNone(wrapper, "no def notify(String text)")
+        self.assertRegex(wrapper, r"node\('docker-e2e'\)\s*\{\s*notifyOnAgent\(text\)")
+        self.assertNotIn("withCredentials", wrapper)
+
+    def test_the_maker_is_notified_before_the_confirm_the_signing_retry_and_the_approval(self):
+        """D-072: Resolve notifies before the confirm-tag input; signerLoop notifies before its Retry input; the
+        approval stage's input comes after the Checks stage, which (on the agent) notifies as its last step."""
+        resolve = stage(self.code, "Resolve")
+        self.assertIn("notify(", resolve)
+        self.assertLess(resolve.index("notify("), resolve.index("input(id: 'confirm-tag'"))
+        helper = signer_loop(self.code)
+        self.assertIn("notify(", helper)
+        self.assertLess(helper.index("notify("), helper.index("input("))
+        self.assertIn("SimplySign", helper[helper.index("notify("):helper.index("input(")])
+        checks = stage(self.code, "Checks")
+        self.assertIn("notifyOnAgent(", checks)
+        self.assertNotRegex(checks, r"node\('docker-e2e'\)", "an exclusive agent: no second node inside the stage")
+        approve_text = re.search(r"notifyOnAgent\(\"([^\"]*)\"\)", checks).group(1)
+        self.assertIn("approve", approve_text.lower())
+        self.assertIn("${env.RELEASE_TAG}", approve_text)
+        self.assertIn("${env.BUILD_URL}", approve_text)
+        for snippet in (resolve, helper):
+            self.assertIn("BUILD_URL", snippet[snippet.index("notify("):snippet.index("input(")])
+
+    def test_no_notification_text_carries_the_release_notes_or_the_withdraw_reason(self):
+        for m in re.finditer(r"\bnotify(?:OnAgent)?\(([^\n]*)\)", self.code):
+            self.assertNotIn("RELEASE_NOTES", m.group(1))
+            self.assertNotIn("WITHDRAW_REASON", m.group(1))
 
     def test_the_record_stage_is_in_post_always(self):
         post = post_block(self.code)

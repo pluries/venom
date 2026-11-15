@@ -36,7 +36,9 @@ GITOPS_DEFAULTS = {"GITOPS_URL": "git@git.example.test:example/gitops.git",
                    "GITOPS_OVERLAY": "apps/venom/overlay.yaml",
                    "GITOPS_KNOWN_HOSTS": GITOPS_KNOWN_HOSTS_TEXT}
 MANAGED_ENV = ("PUBLISH_SSH_KEY", "IM_MIRROR_USER", "IM_SHA_FULL", "PUBLISH_APPROVED_BY", "PUBLISH_DRY_RUN",
-               "PUBLISH_GITHUB_SCRIPT", "GIT_SSH_COMMAND", "GITOPS_BRANCH", "PUBLISH_DRY_RUN_TIMEOUT") + GITOPS_NAMES
+               "PUBLISH_GITHUB_SCRIPT", "GIT_SSH_COMMAND", "GITOPS_BRANCH", "PUBLISH_DRY_RUN_TIMEOUT",
+               "PUBLISH_GIT_NAME", "PUBLISH_GIT_EMAIL", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME",
+               "GIT_COMMITTER_EMAIL") + GITOPS_NAMES
 
 GIT_STUB = """\
 #!/usr/bin/env bash
@@ -61,6 +63,7 @@ PUBLISH_STUB = """\
 #!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$STUB_LOG_DIR/publish.log"
 printf 'DRY=%s\\nSSH=%s\\n' "${PUBLISH_DRY_RUN-unset}" "${GIT_SSH_COMMAND-unset}" >> "$STUB_LOG_DIR/publish.env"
+printf 'AN=%s\\nAE=%s\\nCN=%s\\nCE=%s\\n' "${GIT_AUTHOR_NAME-unset}" "${GIT_AUTHOR_EMAIL-unset}" "${GIT_COMMITTER_NAME-unset}" "${GIT_COMMITTER_EMAIL-unset}" >> "$STUB_LOG_DIR/publish.env"
 echo "secret scan: clean"
 if [ -n "${STUB_PUBLISH_FAIL:-}" ]; then
   echo "scan refused the content" >&2
@@ -266,6 +269,45 @@ class MirrorSteps(unittest.TestCase):
         self.assertTrue(match.group(2).endswith("/jenkins/github-known-hosts"), ssh)
         self.assertRegex(match.group(2), r"^(/|[A-Za-z]:)")
         self.assertNotIn("accept-new", ssh)
+
+    def test_identity_the_publish_script_gets_the_maker_s_author_and_committer_in_the_dry_run_and_in_a_publish(self):
+        """The snapshot commit needs an author, and the agent user has none (develop publish run 2: `unable to
+        auto-detect email address`). The default is the identity of every existing snapshot commit of the public fork."""
+        for command, extra in (("dry-run", None), ("publish", {"PUBLISH_APPROVED_BY": APPROVER})):
+            with self.subTest(command=command):
+                env = self.steps(command, extra=extra).publish_env
+                self.assertEqual("Christian STEPHAN", env.get("AN"))
+                self.assertEqual("chris.stephan1996@outlook.com", env.get("AE"))
+                self.assertEqual(env.get("AN"), env.get("CN"))
+                self.assertEqual(env.get("AE"), env.get("CE"))
+
+    def test_identity_can_be_overridden_by_the_job_with_a_name_and_an_email(self):
+        env = self.steps("dry-run", extra={"PUBLISH_GIT_NAME": "Venom publish", "PUBLISH_GIT_EMAIL": "noreply@pluries.dev"}).publish_env
+        self.assertEqual(("Venom publish", "noreply@pluries.dev"), (env.get("AN"), env.get("AE")))
+        self.assertEqual(("Venom publish", "noreply@pluries.dev"), (env.get("CN"), env.get("CE")))
+
+    def test_identity_a_caller_s_own_git_variables_are_replaced_not_kept(self):
+        env = self.steps("dry-run", extra={"GIT_AUTHOR_NAME": "someone else", "GIT_COMMITTER_EMAIL": "else@example.test"}).publish_env
+        self.assertEqual("Christian STEPHAN", env.get("AN"))
+        self.assertEqual("chris.stephan1996@outlook.com", env.get("CE"))
+
+    def test_identity_a_malformed_name_or_email_is_refused_before_any_git_command_and_without_echoing_it(self):
+        bad = [("PUBLISH_GIT_NAME", "two\nlines"), ("PUBLISH_GIT_NAME", "<angle>"), ("PUBLISH_GIT_NAME", "x" * 81),
+               ("PUBLISH_GIT_EMAIL", "no-at-sign"), ("PUBLISH_GIT_EMAIL", "a b@c.test"), ("PUBLISH_GIT_EMAIL", "a@b@c.test"),
+               ("PUBLISH_GIT_EMAIL", "<a@c.test>")]
+        for name, value in bad:
+            with self.subTest(name=name, value=value[:12]):
+                other = "Venom publish" if name == "PUBLISH_GIT_EMAIL" else "noreply@pluries.dev"
+                paired = {"PUBLISH_GIT_NAME": other} if name == "PUBLISH_GIT_EMAIL" else {"PUBLISH_GIT_EMAIL": other}
+                result = self.steps("dry-run", extra={name: value, **paired})
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(name, result.everything())
+                self.assertNotIn(value, result.everything())
+                self.assertEqual([], result.git_calls)
+                self.assertEqual([], result.publish_calls)
+
+    def test_identity_setup_does_not_need_an_identity(self):
+        self.assertEqual(0, self.steps("setup").returncode)
 
     def test_T1_a_matching_full_commit_id_is_accepted(self):
         result = self.steps("dry-run", extra={"IM_SHA_FULL": FULL_SHA})

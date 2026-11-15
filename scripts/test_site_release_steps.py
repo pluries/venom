@@ -46,7 +46,11 @@ PLANTED = {"PLANTED_TOKEN": canary("t", "1"), "PLANTED_KEY_FILE": canary("k", "2
            "RELEASE_NOTES": canary("n", "5")}
 DIFFERING = "venom.linux-arm"
 APPROVERS = "maker-example,second.user"
-TODAY = datetime.date.today().isoformat()
+def today() -> str:
+    """Read when an exception line is written, not once at import: a run that crosses midnight creates its
+    fixture commit on the next day, and an exception dated before the commit is refused (develop build 298,
+    2026-11-13)."""
+    return datetime.date.today().isoformat()
 
 
 def named(name: str, text: str) -> bool:
@@ -438,17 +442,18 @@ class ReleaseReproduce(BuildCase):
     def test_a_named_exception_with_four_fields_passes_and_is_printed(self):
         """Task T012, US1-AS6: file, reason, approver and date accepted; the exception is printed for the record."""
         tree = self.prepared(STUB_MAKE_DIFFER=DIFFERING)
-        self.exceptions(tree, f"{DIFFERING} embedded-build-id maker-example {TODAY}\n")
+        day = today()
+        self.exceptions(tree, f"{DIFFERING} embedded-build-id maker-example {day}\n")
         result = tree.run("reproduce")
         self.assertEqual(result.returncode, 0, result.stderr)
-        for word in (DIFFERING, "embedded-build-id", "maker-example", TODAY):
+        for word in (DIFFERING, "embedded-build-id", "maker-example", day):
             self.assertIn(word, result.stdout)
 
     def test_an_exception_for_another_file_or_with_a_missing_field_is_refused(self):
         """Task T012, US1-AS6, design 7: an exception for another file, three fields, or a date before the tag fails."""
-        lines = {"another file": f"venom.linux-386 embedded-build-id maker-example {TODAY}\n",
+        lines = {"another file": f"venom.linux-386 embedded-build-id maker-example {today()}\n",
                  "three fields": f"{DIFFERING} embedded-build-id maker-example\n",
-                 "outside the ten": f"venom.linux-mips embedded-build-id maker-example {TODAY}\n",
+                 "outside the ten": f"venom.linux-mips embedded-build-id maker-example {today()}\n",
                  "date too old": f"{DIFFERING} embedded-build-id maker-example 2001-01-01\n"}
         for label, line in lines.items():
             with self.subTest(case=label):
@@ -1031,6 +1036,129 @@ RECORD_INPUT = {"agent_label": "docker-e2e", "agent_image": "example/agent:1", "
 
 
 @requires_release
+class CaptureServer:
+    """A loopback HTTP server that records every POST (path, body) and answers with a fixed status."""
+
+    def __init__(self, status: int = 204):
+        import http.server
+        import threading
+        self.posts: list = []
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", "0"))
+                outer.posts.append((self.path, self.rfile.read(length).decode("utf-8")))
+                self.send_response(status)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def url(self, path: str = "/api/webhooks/123456/tok_en-ABC") -> str:
+        return f"http://127.0.0.1:{self.server.server_address[1]}{path}"
+
+    def stop(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+
+class ReleaseNotify(ReleaseCase):
+    """D-072: `notify <text>` posts one short message to the Discord webhook in DISCORD_WEBHOOK, so the maker knows
+    the run waits for a confirm, a Retry or an approval. It never fails the run (always status 0), never prints the
+    webhook, and only talks to discord.com, discordapp.com or a loopback address (the tests)."""
+
+    def server(self, status: int = 204) -> CaptureServer:
+        server = CaptureServer(status)
+        self.addCleanup(server.stop)
+        return server
+
+    def notify(self, text: str, webhook: str | None, **env):
+        full = dict(env)
+        if webhook is not None:
+            full["DISCORD_WEBHOOK"] = webhook
+        return self.tree.run("notify", [text], env=full)
+
+    def test_it_posts_the_text_as_json_content_to_the_webhook_and_says_sent(self):
+        import json
+        server = self.server()
+        result = self.notify("venom release: approve v1.5.0-pluries.1", server.url())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(1, len(server.posts), server.posts)
+        path, body = server.posts[0]
+        self.assertEqual("/api/webhooks/123456/tok_en-ABC", path)
+        self.assertEqual({"content": "venom release: approve v1.5.0-pluries.1"}, json.loads(body))
+        self.assertIn("sent", result.stdout)
+
+    def test_it_never_prints_the_webhook_or_its_token(self):
+        server = self.server()
+        for status in (204, 500):
+            with self.subTest(status=status):
+                other = self.server(status)
+                result = self.notify("text", other.url())
+                self.assertNotIn("tok_en-ABC", result.stdout + result.stderr)
+                self.assertNotIn("/api/webhooks", result.stdout + result.stderr)
+        self.assertEqual(0, len(server.posts))
+
+    def test_without_a_webhook_it_skips_and_succeeds(self):
+        for webhook in (None, ""):
+            with self.subTest(webhook=webhook):
+                result = self.notify("text", webhook)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("skipped", result.stdout)
+
+    def test_a_webhook_on_another_host_is_refused_without_a_request_and_without_failing(self):
+        server = self.server()
+        for webhook in ("http://evil.example/api/webhooks/1/abc", "https://example.com/api/webhooks/1/abc",
+                        "ftp://discord.com/api/webhooks/1/abc", "https://discord.com.evil.example/api/webhooks/1/abc",
+                        "not a url", server.url().replace("/api/webhooks/123456/tok_en-ABC", "/other")):
+            with self.subTest(webhook=webhook):
+                result = self.notify("text", webhook)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("skipped", result.stdout)
+                self.assertNotIn("evil.example", result.stdout + result.stderr)
+        self.assertEqual(0, len(server.posts))
+
+    def test_a_server_error_or_a_closed_port_does_not_fail_the_run(self):
+        failing = self.server(500)
+        result = self.notify("text", failing.url())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("not sent", result.stdout)
+        closed = self.server()
+        url = closed.url()
+        closed.stop()
+        result = self.notify("text", url)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("not sent", result.stdout)
+
+    def test_the_text_is_one_line_without_control_characters_and_at_most_300_characters(self):
+        import json
+        server = self.server()
+        self.notify("first\nsecond\tthird\x01" + "x" * 400, server.url())
+        content = json.loads(server.posts[0][1])["content"]
+        self.assertNotRegex(content, r"[\x00-\x1f]")
+        self.assertLessEqual(len(content), 300)
+        self.assertTrue(content.startswith("first second third"), content)
+
+    def test_an_empty_text_sends_nothing(self):
+        server = self.server()
+        result = self.notify("", server.url())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(0, len(server.posts))
+        self.assertIn("skipped", result.stdout)
+
+    def test_a_double_quote_or_a_backslash_in_the_text_stays_valid_json(self):
+        import json
+        server = self.server()
+        text = 'tag "v1" and a \\ backslash'
+        self.notify(text, server.url())
+        self.assertEqual(text, json.loads(server.posts[0][1])["content"])
+
+
 class ReleaseRecord(ReleaseCase):
     """Task T036: `record` writes <work>/release-record.md (US2-AS10, US1-AS10, FR-009, NFR-011).
     Environment: RELEASE_STATUS (success, failed or aborted), RELEASE_TAG, RELEASE_SHA, RELEASE_APPROVER,
