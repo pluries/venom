@@ -2,7 +2,7 @@
 
 Venom is a CLI (Command Line Interface) that aims to create, manage and run your integration tests with efficiency.
 
-<a href="https://github.com/ovh/venom/releases/latest"><img alt="GitHub release" src="https://img.shields.io/github/v/release/ovh/venom.svg?logo=github&style=flat-square"></a>
+<a href="https://github.com/pluries/venom/releases/latest"><img alt="GitHub release" src="https://img.shields.io/github/v/release/pluries/venom.svg?logo=github&style=flat-square&include_prereleases"></a>
 [![GoDoc](https://godoc.org/github.com/ovh/venom?status.svg)](https://godoc.org/github.com/ovh/venom)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ovh/venom)](https://goreportcard.com/report/github.com/ovh/venom)
 [![Discussions](https://img.shields.io/badge/Discussions-OVHcloud-brightgreen)](https://github.com/ovh/venom/discussions)
@@ -74,21 +74,38 @@ It can also generate xUnit result files.
 
 ## Install from binaries
 
-You can find the latest binary release at: https://github.com/ovh/venom/releases/latest/.
+Every release of this fork is published at https://github.com/pluries/venom/releases/latest. It holds one executable per platform:
+`venom.linux-amd64`, `venom.linux-arm64`, `venom.linux-arm`, `venom.linux-386`, `venom.darwin-amd64`, `venom.darwin-arm64`,
+`venom.windows-amd64.exe`, `venom.freebsd-amd64` and `venom.openbsd-amd64`, plus the checksum list `SHA256SUMS` and its signature `SHA256SUMS.p7s`.
 
 Example for Linux:
 
 ```bash
-$ curl https://github.com/ovh/venom/releases/download/v1.2.0/venom.linux-amd64 -L -o /usr/local/bin/venom && chmod +x /usr/local/bin/venom
+$ curl -L -o venom https://github.com/pluries/venom/releases/latest/download/venom.linux-amd64
+$ chmod +x venom && sudo mv venom /usr/local/bin/venom
 $ venom -h
 ```
+
+### Verify the download
+
+The checksum list is signed with a Certum code-signing certificate, and the Windows executable also carries an Authenticode signature.
+You need `sha256sum` and `openssl`, nothing else:
+
+```bash
+$ curl -LO https://github.com/pluries/venom/releases/latest/download/SHA256SUMS
+$ curl -LO https://github.com/pluries/venom/releases/latest/download/SHA256SUMS.p7s
+$ sha256sum -c SHA256SUMS --ignore-missing
+$ openssl cms -verify -inform DER -in SHA256SUMS.p7s -content SHA256SUMS -binary -purpose any
+```
+
+The first check compares your file with the list, the second proves that the list was signed by the maintainer's certificate.
 
 # Updating
 
 This fork has no `venom update` command. The upstream command downloaded the latest release of the upstream project
-without checking a checksum or signature (#2296). This fork publishes no release binaries: it tags releases (`v1.0.0`) and you build from the tag.
-
-To update, build the new version (`go build ./cmd/venom`), then check the version:
+without checking a checksum or signature (#2296). To update, download the new executable from
+https://github.com/pluries/venom/releases/latest and [verify it](#verify-the-download), or build the tag yourself (`go build ./cmd/venom`).
+Then check the version:
 
 ```bash
 $ venom version
@@ -96,16 +113,17 @@ $ venom version
 
 # Docker image
 
-Instead of installing (and updating) Venom locally, Venom can be started as a Docker image with the following commands. 
+Instead of installing (and updating) Venom locally, Venom can be started as a Docker image with the following commands.
+The image of this fork is `ghcr.io/pluries/venom`.
 
 Considering your testsuites are in `./tests` directory in your current directory and your test library is under `./tests/lib`, the results will be available under the `results` directory.
 
 ```bash
 $ mkdir -p results
-$ docker run --mount type=bind,source=$(pwd)/tests,target=/workdir/tests --mount type=bind,source=$(pwd)/results,target=/workdir/results ovhcom/venom:latest 
+$ docker run --mount type=bind,source=$(pwd)/tests,target=/workdir/tests --mount type=bind,source=$(pwd)/results,target=/workdir/results ghcr.io/pluries/venom:latest
 ```
 
-Please refer to https://hub.docker.com/r/ovhcom/venom/tags to get the available image tags.
+Each release also has its own image tag, for example `ghcr.io/pluries/venom:v1.5.0-pluries.1`. Use a release tag in a pipeline so that the image does not change under you.
 
 # CLI Usage
 

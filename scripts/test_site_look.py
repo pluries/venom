@@ -384,5 +384,51 @@ class Robustness(LookCase):
         self.assertEqual(text.count('class="side-group"'), 2)
 
 
+class ContentImages(unittest.TestCase):
+    """The demo animation of the overview page was wider than the column and ran off the page (2026-11-16)."""
+
+    def test_an_image_in_the_content_never_exceeds_its_column(self):
+        css = (ROOT / "site" / "style.css").read_text(encoding="utf-8")
+        rules = re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+        hits = [(sel, body) for sel, body in rules
+                if re.search(r"(^|[\s,])(\.prose\s+)?img", sel) and "max-width: 100%" in body.replace("max-width:100%", "max-width: 100%")
+                and "height: auto" in body.replace("height:auto", "height: auto")]
+        self.assertTrue(hits, "no rule gives content images max-width: 100% and height: auto")
+
+
+class HomeSellingPoints(unittest.TestCase):
+    """The first page sells what this fork adds to the original (change request of 2026-11-16, spec 010 D-020)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.home = (ROOT / "site" / "home.html").read_text(encoding="utf-8")
+        match = re.search(r'<section class="band wrap-wide why">(.*?)</section>', cls.home, flags=re.S)
+        cls.why = match.group(1) if match else ""
+
+    def test_the_home_page_has_a_why_this_fork_section_before_the_navigation_cards(self):
+        self.assertTrue(self.why, "no <section class=\"band wrap-wide why\"> on the home page")
+        self.assertLess(self.home.index('class="band wrap-wide why"'), self.home.index("{{group_cards}}"))
+
+    def test_the_section_names_the_five_gains(self):
+        text = re.sub(r"<[^>]+>", " ", self.why).lower()
+        for needle in ("maintained", "upgraded", "new executors", "faster", "signed"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, text)
+
+    def test_only_measured_figures_are_claimed(self):
+        text = re.sub(r"<[^>]+>", " ", self.why)
+        figures = set(re.findall(r"\d+(?:\.\d+)?\s?[x×]", text))
+        self.assertTrue(figures <= {"13 x", "13x", "13×", "3.4×", "3.4x", "5.6×", "5.6x"}, figures)
+
+    def test_the_new_executors_named_exist_in_the_repository(self):
+        for name in ("mcp", "mobile"):
+            with self.subTest(name=name):
+                self.assertIn(name, re.sub(r"<[^>]+>", " ", self.why).lower())
+                self.assertTrue((ROOT / "executors" / name).is_dir())
+
+    def test_the_old_facts_strip_is_replaced_by_the_section_not_duplicated(self):
+        self.assertEqual(self.home.count('class="facts"'), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

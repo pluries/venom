@@ -160,6 +160,10 @@ hr { border: 0; border-top: 2px solid var(--line); margin: 2em 0; }
 .card { padding: 26px; border: 2px solid var(--line); background: var(--ink-2); }
 .card h3 { margin: 0 0 8px; font-family: "Archivo", "Arial Black", system-ui, sans-serif; font-weight: 700; font-size: 1.5rem; }
 .card p { margin: 0; color: var(--mute); }
+.card b { color: var(--bone); }
+.why .lede { max-width: 760px; margin: 0; color: var(--mute); font-size: 1.125rem; }
+.card .tag { display: block; margin-bottom: 10px; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.8125rem; text-transform: uppercase; color: var(--venom); }
+.prose img, .prose picture { max-width: 100%; height: auto; }
 
 .home-docs h2 { margin-bottom: 32px; }
 .home-docs ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; }

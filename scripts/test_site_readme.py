@@ -524,5 +524,45 @@ class LocalImages(unittest.TestCase):
         self.assertNotIn("<img", data)
 
 
+class T7ForkInstall(unittest.TestCase):
+    """The install, update and Docker sections describe this fork's releases, not upstream's (change request of 2026-11-16)."""
+
+    @classmethod
+    def setUpClass(cls):
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        sections = dict(h1_sections(text))
+        cls.installing = "\n".join(sections["Installing"])
+        cls.updating = "\n".join(sections["Updating"])
+        cls.docker = "\n".join(sections["Docker image"])
+        cls.head = text.split("# Overview")[0]
+
+    def test_install_names_the_fork_release_and_never_an_upstream_download(self):
+        self.assertIn("https://github.com/pluries/venom/releases/latest", self.installing)
+        self.assertNotIn("ovh/venom/releases", self.installing)
+        self.assertNotIn("v1.2.0", self.installing)
+
+    def test_install_uses_the_published_executable_names(self):
+        for name in ("venom.linux-amd64", "venom.darwin-arm64", "venom.windows-amd64.exe"):
+            with self.subTest(name=name):
+                self.assertIn(name, self.installing)
+
+    def test_install_shows_how_to_verify_the_checksums_and_the_signature(self):
+        for needle in ("SHA256SUMS", "SHA256SUMS.p7s", "sha256sum -c", "openssl cms -verify"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, self.installing)
+
+    def test_updating_no_longer_says_the_fork_publishes_no_binaries(self):
+        self.assertNotIn("publishes no release binaries", self.updating)
+        self.assertIn("pluries/venom/releases", self.updating)
+
+    def test_docker_section_uses_the_fork_image_not_upstream_s(self):
+        self.assertIn("ghcr.io/pluries/venom", self.docker)
+        self.assertNotIn("ovhcom/venom", self.docker)
+        self.assertNotIn("hub.docker.com/r/ovhcom", self.docker)
+
+    def test_the_badges_do_not_point_at_the_upstream_release(self):
+        self.assertNotIn("img.shields.io/github/v/release/ovh/venom", self.head)
+
+
 if __name__ == "__main__":
     unittest.main()

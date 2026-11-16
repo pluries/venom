@@ -50,6 +50,19 @@ final status: <span class="ok">PASS</span></code></pre></div>
 ./venom run site/examples/quickstart.yml</code></pre></div>
 </div></section>
 
+<section class="band wrap-wide why">
+<h2>Why this fork</h2>
+<p class="lede">Venom is a good tool that needed an owner. This fork keeps it maintained, upgrades what it stands on, adds executors, and ships releases you can verify.</p>
+<div class="cards">
+<div class="card"><span class="tag">Maintained</span><h3>Someone is on it</h3><p>213 commits since the previous release. Every change passes lint, tests and a SonarQube gate on new code before it is merged.</p></div>
+<div class="card"><span class="tag">Upgraded</span><h3>Current foundations</h3><p>Built with Go 1.27. Known vulnerabilities in the standard library and in dependencies are fixed as they are found, and a vulnerability scan runs on every build.</p></div>
+<div class="card"><span class="tag">New executors</span><h3>More to test</h3><p><b>mcp</b> tests Model Context Protocol servers over stdio or HTTP. <b>mobile</b> drives Android and iOS apps through Appium. The <b>web</b> executor now runs on Playwright.</p></div>
+<div class="card"><span class="tag">Faster</span><h3>Measured, not promised</h3><p>A run that reuses a large captured response across steps is 13&times; faster and uses about six times less memory. <code>--parallel</code> runs test files at once: 3.4&times; at 4 workers and 5.6&times; at 8, on files that spend their time waiting.</p></div>
+<div class="card"><span class="tag">Secure by default</span><h3>Checked, not trusted</h3><p>One TLS layer for every executor, SSH host keys always verified, and no self-update that downloads a binary without checking it.</p></div>
+<div class="card"><span class="tag">Signed releases</span><h3>Verify what you run</h3><p>Executables for Linux, macOS, Windows, FreeBSD and OpenBSD, a signed checksum list, and a container image at <code>ghcr.io/pluries/venom</code>.</p></div>
+</div>
+</section>
+
 <section class="band wrap-wide">
 <h2>Find your way in</h2>
 {{group_cards}}
