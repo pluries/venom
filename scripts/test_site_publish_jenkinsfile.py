@@ -282,6 +282,13 @@ class PublishJenkinsfile(unittest.TestCase):
         self.assertEqual(code.count("docker-e2e"), 1)
         self.assertEqual(string_value(inner(mirror, "gitops"), "script"), "jenkins/gitops-steps.sh")
 
+    def test_T3_image_credential_is_the_maker_s_existing_docker_hub_credential(self):
+        """The registry credential that exists in Jenkins is `elieabouaad-dockerhub`; run 3 of venom-publish failed with
+        `Could not find credentials entry with ID 'site-registry'` (2026-11-15), and the maker chose to point the job."""
+        image = inner(inner(code_of(self.real()), "mirror"), "image")
+        self.assertEqual(string_value(image, "credentialsId"), "elieabouaad-dockerhub")
+        self.assertNotIn("site-registry", code_of(self.real()))
+
     def test_T3_each_missing_key_is_reported(self):
         base = code_of(self.real())
         keys = [
