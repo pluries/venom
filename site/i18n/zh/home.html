@@ -1,0 +1,102 @@
+<!--
+translates: index
+title: Pluries Venom
+description: Venom 运行用 YAML 编写的集成测试。
+fingerprint: a1161ab614406fcfae8490e0b5398e3b56fe13c92169dd92a7ef4e311541d34c
+drafted_on: 2026-11-16
+status: reviewed
+drafted_by: claude
+reviewed_by: Christian Stephan
+reviewed_on: 2026-11-16
+reviewed_fingerprint: a1161ab614406fcfae8490e0b5398e3b56fe13c92169dd92a7ef4e311541d34c
+-->
+<!doctype html>
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{site_title}}：用 YAML 编写的集成测试</title>
+<meta name="description" content="{{description}}">
+{{alternates}}
+{{head_links}}
+{{scripts}}
+<link rel="stylesheet" href="{{assets}}style.css">
+</head>
+<body class="home" data-ui="{{data_ui}}">
+<a class="skip" href="#main">{{ui_skip}}</a>
+{{topbar}}
+{{banners}}
+
+<main id="main"{{main_lang}}>
+<section class="hero"><div class="wrap-wide hero-inner">
+<p class="eyebrow">// 用 yaml 声明的集成测试</p>
+<h1>YAML 进，<br><span class="accent">PASS</span> 出。</h1>
+<p class="lead">在一个文件里描述测试套件。Venom 运行每个步骤，检查每条断言，并告诉您哪一行失败了。</p>
+<div class="cta">
+<a class="btn" href="quickstart.html">快速入门</a>
+<a class="btn-ghost" href="overview.html">阅读文档</a>
+<span class="fine">ovh/venom 的独立分支 · Apache-2.0</span>
+</div>
+<div class="demo">
+<div class="panel"><div class="panel-title">site/examples/quickstart.yml</div>
+<pre><code><span class="k">name</span>: <span class="s">Quickstart suite</span>
+<span class="k">testcases</span>:
+  - <span class="k">name</span>: <span class="s">say hello</span>
+    <span class="k">steps</span>:
+      - <span class="k">type</span>: <span class="s">exec</span>
+        <span class="k">script</span>: <span class="s">echo "hello venom"</span>
+        <span class="k">assertions</span>:
+          - <span class="s">result.systemout ShouldContainSubstring hello</span>
+          - <span class="s">result.code ShouldEqual 0</span></code></pre></div>
+<div class="panel"><div class="panel-title">运行输出</div>
+<pre><code><span class="dim">$ venom run site/examples/quickstart.yml</span>
+ • Quickstart suite (site/examples/quickstart.yml)
+ 	• <span class="ok">say-hello PASS</span>
+final status: <span class="ok">PASS</span></code></pre></div>
+</div>
+<div class="facts">
+<p class="fact"><b>{{executor_count}} 个 executor</b>HTTP、SQL、exec、gRPC、Kafka 等</p>
+<p class="fact"><b>一个文件</b>步骤、变量和断言，全部写在 YAML 中</p>
+<p class="fact"><b>无需服务</b>单个可执行文件，没有守护进程要运行</p>
+<p class="fact"><b>Apache-2.0</b>ovh/venom 的独立分支</p>
+</div>
+<div class="prose"><pre><code>go build -o venom ./cmd/venom
+./venom run site/examples/quickstart.yml</code></pre></div>
+</div></section>
+
+<section class="band wrap-wide why">
+<h2>关于这个分支</h2>
+<p class="lede">Venom 是一款扎实可靠的工具，这个分支让它继续向前：持续维护，保持更新，增加新的 executor，并发布可以验证的版本。</p>
+<div class="cards">
+<div class="card"><span class="tag">持续维护</span><h3>有人在负责</h3><p>自上一个版本以来共有 213 次提交。每项改动在合并之前，都要通过 lint、测试以及针对新代码的 SonarQube 质量门禁。</p></div>
+<div class="card"><span class="tag">已经升级</span><h3>当前的底层</h3><p>使用 Go 1.27 构建。标准库和依赖中已知的漏洞一经发现就会修复，每次构建都会运行漏洞扫描。</p></div>
+<div class="card"><span class="tag">新 executor</span><h3>可测试的更多</h3><p><b>mcp</b> 通过 stdio 或 HTTP 测试 Model Context Protocol 服务器。<b>mobile</b> 通过 Appium 驱动 Android 和 iOS 应用。<b>web</b> executor 现在基于 Playwright 运行。</p></div>
+<div class="card"><span class="tag">更快</span><h3>有实测，不是承诺</h3><p>在多个步骤间复用大型已捕获响应的运行，速度提高 13&times;，内存占用约为原来的六分之一。<code>--parallel</code> 可同时运行多个测试文件：对大部分时间都在等待的文件，4 个并行任务时提速 3.4&times;，8 个时提速 5.6&times;。</p></div>
+<div class="card"><span class="tag">默认安全</span><h3>经过检查，而非盲目信任</h3><p>所有 executor 共用一套 TLS 层，SSH 主机密钥始终经过验证，也没有下载二进制文件却不加校验的自更新功能。</p></div>
+<div class="card"><span class="tag">签名发布</span><h3>验证您运行的内容</h3><p>提供适用于 Linux、macOS、Windows、FreeBSD 和 OpenBSD 的可执行文件、带签名的校验和清单，以及位于 <code>ghcr.io/pluries/venom</code> 的容器镜像。</p></div>
+</div>
+</section>
+
+<section class="band wrap-wide">
+<h2>找到您的入口</h2>
+{{group_cards}}
+</section>
+
+<section class="band wrap-wide">
+<h2>从安装到第一份报告</h2>
+<ol class="path">
+<li><span class="step">第 1 步</span><h3><a href="quickstart.html">安装</a></h3><p>下载发布的二进制文件，或从源代码构建命令行工具。</p></li>
+<li><span class="step">第 2 步</span><h3><a href="quickstart.html">编写测试套件</a></h3><p>在 YAML 文件中描述每个测试用例的步骤和断言。</p></li>
+<li><span class="step">第 3 步</span><h3><a href="quickstart.html">运行</a></h3><p>对单个文件或包含多个测试套件的文件夹执行 <code>venom run</code>。</p></li>
+<li><span class="step">第 4 步</span><h3><a href="quickstart.html">查看报告</a></h3><p>在控制台查看结果，或生成 JSON、XML、HTML 文件。</p></li>
+</ol>
+</section>
+
+<section class="band wrap-wide home-docs">
+{{content}}
+</section>
+</main>
+
+<footer class="foot"><div class="wrap-wide"><span>{{ui_footer_notice}} <a href="https://github.com/ovh/venom">{{ui_footer_upstream}}</a> · <a href="https://github.com/pluries/venom/blob/main/LICENSE">{{ui_footer_licence}}</a></span><a href="https://github.com/pluries/venom">github.com/pluries/venom</a></div></footer>
+</body>
+</html>

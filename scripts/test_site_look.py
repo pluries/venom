@@ -18,6 +18,7 @@ from urllib.parse import unquote
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_site as bs  # noqa: E402
 from test_build_site import ROOT, write_files  # noqa: E402
+from test_site_i18n import translation, write_ui  # noqa: E402
 
 BASE_URL = "https://venom.pluries.dev"
 REPO_URL = "https://github.com/pluries/venom"
@@ -37,12 +38,17 @@ def missing_assets() -> list[str]:
     return missing
 
 
-def scratch_site(pages: list[dict], sources: dict[str, str], extra_groups: dict[str, str] | None = None) -> tuple[Path, Path]:
-    """A scratch repository: a copy of the real site assets, a site.json written here, the page sources; built into a temp folder."""
+def scratch_site(pages: list[dict], sources: dict[str, str], extra_groups: dict[str, str] | None = None,
+                 languages: dict | None = None) -> tuple[Path, Path]:
+    """A scratch repository: a copy of the real site assets, a site.json written here, the page sources; built into a temp folder.
+    With `languages`, those languages are built as well; their interface text is the English one with a marker in front of each string."""
     root = Path(tempfile.mkdtemp())
-    shutil.copytree(ROOT / "site", root / "site", ignore=shutil.ignore_patterns("pages", "examples", "_build", "site.json"))
+    shutil.copytree(ROOT / "site", root / "site", ignore=shutil.ignore_patterns("pages", "examples", "_build", "site.json", "fr", "de", "it", "es", "zh"))
     groups = {"Guides": "How-to guides.", "Concepts": "How venom works.", **(extra_groups or {})}
     config = {"title": "Pluries Venom", "repo": REPO_URL, "branch": "main", "baseUrl": BASE_URL, "groups": groups, "pages": pages}
+    if languages:
+        config["languages"] = languages
+        write_ui(root, languages)
     write_files(root, {"site/site.json": json.dumps(config), **sources})
     out = root / "_out"
     errors = bs.build(root, out)
@@ -62,9 +68,14 @@ STANDARD_PAGES = [page("index", "Home", template="site/home.html"), page("alpha"
 STANDARD_SOURCES = {"index.md": "# Home\n\nHome text.\n", "alpha.md": "# Alpha\n\nAlpha body text.\n", "beta.md": "# Beta\n\nBeta body text.\n"}
 
 
+FR_LANGUAGES = {"en": {"name": "English", "path": "", "lang": "en"}, "fr": {"name": "Français", "path": "fr", "lang": "fr", "enabled": True}}
+FR_SOURCES = {"site/i18n/fr/alpha.md": translation("alpha", "Alpha FR", "# Alpha FR {#alpha}\n\nCorps de la page alpha.\n")}
+
+
 @functools.lru_cache(maxsize=None)
 def _standard_cached() -> tuple[Path, Path]:
-    return scratch_site(STANDARD_PAGES, STANDARD_SOURCES)
+    """The English site and, next to it, French with one translated page (alpha) and two pages served as English (index, beta)."""
+    return scratch_site(STANDARD_PAGES, {**STANDARD_SOURCES, **FR_SOURCES}, languages=FR_LANGUAGES)
 
 
 class LookCase(unittest.TestCase):
@@ -80,6 +91,16 @@ class LookCase(unittest.TestCase):
         pages = {p.name: p.read_text(encoding="utf-8") for p in sorted(out.glob("*.html"))}
         self.assertEqual(set(pages), {"index.html", "alpha.html", "beta.html"})
         return pages
+
+    def language_pages(self) -> dict[str, str]:
+        """The pages of the French folder of the standard build, by their path under the output folder."""
+        out = self.standard()
+        pages = {f"fr/{p.name}": p.read_text(encoding="utf-8") for p in sorted((out / "fr").glob("*.html"))}
+        self.assertEqual(set(pages), {"fr/index.html", "fr/alpha.html", "fr/beta.html"})
+        return pages
+
+    def french_ui(self) -> dict:
+        return json.loads((self.standard().parent / "site" / "i18n" / "fr" / "ui.json").read_text(encoding="utf-8"))
 
 
 # ---------- text helpers ----------
@@ -129,18 +150,42 @@ class Footer(LookCase):
                 self.assertIn(REPO_URL, hrefs)
 
     def test_no_page_outside_its_footer_names_the_project_it_was_copied_from(self):
-        for name, text in self.html_pages().items():
+        for name, text in {**self.html_pages(), **self.language_pages()}.items():
             body = re.sub(r"<footer\b.*?</footer>", "", text, flags=re.S | re.I).lower()
             for word in FORBIDDEN_WORDS:
                 with self.subTest(page=name, word=word):
                     self.assertNotIn(word, body)
+
+    def test_us1_as4_every_page_of_a_language_carries_the_fork_notice_in_that_language(self):
+        notice = self.french_ui()["footer_notice"]
+        self.assertNotEqual(notice, "Pluries Venom is an independent fork of ovh/venom, published under the Apache-2.0 licence.")
+        for name, text in self.language_pages().items():
+            _, words = footer_of(text)
+            with self.subTest(page=name):
+                self.assertIn(notice, words)
+                self.assertIn("Apache-2.0", words)
+
+    def test_us1_as4_english_pages_keep_the_english_sentence_next_to_a_translated_site(self):
+        self.assertEqual(self.french_ui()["footer_notice"], "[fr] Pluries Venom is an independent fork of ovh/venom, published under the Apache-2.0 licence.")
+        for name, text in self.html_pages().items():
+            with self.subTest(page=name):
+                self.assertIn("Pluries Venom is an independent fork of ovh/venom, published under the Apache-2.0 licence.", footer_of(text)[1])
+                self.assertNotIn("[fr]", footer_of(text)[1])
+
+    def test_us1_as4_every_page_of_a_language_links_upstream_the_licence_and_the_fork(self):
+        for name, text in self.language_pages().items():
+            hrefs, _ = footer_of(text)
+            with self.subTest(page=name):
+                self.assertIn(UPSTREAM_URL, hrefs)
+                self.assertTrue(any(h.endswith("/LICENSE") for h in hrefs), hrefs)
+                self.assertIn(REPO_URL, hrefs)
 
 
 # ---------- T3: placeholders ----------
 
 class Placeholders(LookCase):
     def test_no_page_holds_an_unresolved_placeholder(self):
-        for name, text in self.html_pages().items():
+        for name, text in {**self.html_pages(), **self.language_pages()}.items():
             with self.subTest(page=name):
                 self.assertEqual(re.findall(r"\{\{\s*[\w.]+\s*\}\}", text), [])
 
@@ -382,6 +427,192 @@ class Robustness(LookCase):
         self.assertNotIn("<summary>Reference</summary>", text)
         self.assertNotIn("<h3>Reference</h3>", (out / "index.html").read_text(encoding="utf-8"))
         self.assertEqual(text.count('class="side-group"'), 2)
+
+
+class LanguageFolders(LookCase):
+    """US1-AS4, AS13, FR-023: the tests above walk the language folders too; these are the checks that only apply to a language page."""
+
+    def test_the_output_scan_reaches_the_files_of_the_language_folder(self):
+        out = self.standard()
+        found = {p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file() and p.suffix in (".html", ".css", ".js", ".svg")}
+        self.assertTrue({"fr/alpha.html", "fr/index.html", "fr/beta.html", "style.css", "site.js"} <= found, sorted(found))
+
+    def test_a_language_page_loads_the_scripts_of_the_root_by_relative_urls(self):
+        for name, text in self.language_pages().items():
+            sources = re.findall(r"<script\b[^>]*\bsrc=[\"']([^\"']+)[\"']", text)
+            with self.subTest(page=name):
+                self.assertEqual(sources, ["../theme.js", "../site.js"])
+                self.assertTrue(all(not is_remote(s) for s in sources), sources)
+
+    def test_every_remote_reference_of_a_language_page_is_a_link_to_the_fork_its_upstream_or_the_site(self):
+        for name, text in self.language_pages().items():
+            parser = References()
+            parser.feed(text)
+            for tag, attribute, value in parser.found:
+                if is_remote(value):
+                    with self.subTest(page=name, tag=tag, value=value):
+                        self.assertTrue(allowed_link(value), "remote address on another host")
+                        self.assertTrue(tag in ("a", "link") and attribute == "href", "a remote address is a link, never a loaded resource")
+
+    def test_a_language_page_has_balanced_tags(self):
+        for name, text in self.language_pages().items():
+            parser = Balance()
+            parser.feed(text)
+            parser.close()
+            with self.subTest(page=name):
+                self.assertEqual((parser.problems, parser.stack), ([], []))
+
+    def test_the_text_files_of_the_language_folder_name_no_other_host(self):
+        out = self.standard()
+        for path in sorted((out / "fr").glob("*")):
+            text = re.sub(r"""xmlns(?::\w+)?\s*=\s*(["'])[^"']*\1""", "", path.read_text(encoding="utf-8"))
+            for url in URL_TEXT.findall(text):
+                with self.subTest(file=path.name, url=url):
+                    self.assertTrue(allowed_link(url.rstrip(".,;")), "address on another host")
+
+
+# ---------- Chinese typography and narrow screens (US1-AS7, AS14, FR-017, FR-021) ----------
+
+CSS_TEXT = (ROOT / "site" / "style.css").read_text(encoding="utf-8")
+CJK_FONTS = ("PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei",
+             "Heiti SC", "SimHei")
+GENERIC_FAMILIES = ("sans-serif", "system-ui", "monospace", "serif")
+SITE_FONTS = ("Archivo", "Public Sans", "IBM Plex Mono")
+FONT_LIMIT = 100 * 1024
+
+
+def css_rules(css: str = CSS_TEXT) -> list[tuple[list[str], str]]:
+    """(selectors, declarations) of every rule, comments removed; a rule inside @media is a rule."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    return [([part.strip() for part in selector.split(",")], body) for selector, body in re.findall(r"([^{}@]+)\{([^{}]*)\}", css)]
+
+
+def family_list(body: str) -> list[str]:
+    found = re.search(r"font-family:\s*([^;]+)", body)
+    return [name.strip().strip("\"'") for name in found.group(1).split(",")] if found else []
+
+
+class ChineseTypography(unittest.TestCase):
+    """US1-AS7, FR-017: the Chinese text is set in a stack of system fonts; nothing is downloaded for it."""
+
+    def zh_rules(self, region: str) -> list[tuple[list[str], str]]:
+        return [(selectors, body) for selectors, body in css_rules()
+                if any(re.search(r":lang\(\s*zh-Hans\s*\)", s) and re.search(region, s) for s in selectors)]
+
+    def test_us1_as7_the_body_the_headings_and_the_code_of_a_chinese_page_have_a_stack_of_chinese_system_fonts(self):
+        for name, region in (("body", r"(?:^|\s)body\b|^html:lang"), ("headings", r"\bh[1-6]\b"), ("code", r"\b(?:pre|code)\b")):
+            rules = self.zh_rules(region)
+            with self.subTest(region=name):
+                self.assertTrue(rules, f"no rule with :lang(zh-Hans) for {name}")
+                stack = family_list(rules[-1][1])
+                self.assertGreaterEqual(len({f for f in stack if f in CJK_FONTS}), 2, stack)
+                self.assertIn(stack[-1], GENERIC_FAMILIES, stack)
+
+    def test_us1_as7_the_stack_covers_windows_macos_android_and_linux(self):
+        stack = family_list(self.zh_rules(r"(?:^|\s)body\b|^html:lang")[-1][1]) if self.zh_rules(r"(?:^|\s)body\b|^html:lang") else []
+        for system, names in (("Windows", ("Microsoft YaHei",)), ("macOS and iOS", ("PingFang SC",)), ("Android and Linux", ("Noto Sans CJK SC", "Noto Sans SC"))):
+            with self.subTest(system=system):
+                self.assertTrue(any(name in stack for name in names), stack)
+
+    def test_us1_as7_the_sites_own_fonts_stay_first_so_that_latin_text_keeps_its_look(self):
+        stack = family_list(self.zh_rules(r"(?:^|\s)body\b|^html:lang")[-1][1]) if self.zh_rules(r"(?:^|\s)body\b|^html:lang") else []
+        self.assertTrue(stack and stack[0] in SITE_FONTS, stack)
+
+    def test_us1_as7_the_stylesheet_has_no_remote_font_address_and_no_import(self):
+        blocks = re.findall(r"@font-face\s*\{[^}]*\}", CSS_TEXT)
+        self.assertTrue(blocks)
+        for block in blocks:
+            with self.subTest(block=block[:60]):
+                self.assertIn(family_list(block)[0], SITE_FONTS)
+                for address in re.findall(r"url\(\s*['\"]?([^)'\"]+)", block):
+                    self.assertTrue(address.startswith("fonts/") and address.endswith(".woff2"), address)
+                self.assertNotRegex(block, r"(?i)unicode-range:[^;]*(?:4E00|9FFF|3000|FF00)")
+        self.assertNotRegex(CSS_TEXT, r"(?i)@import")
+        self.assertNotRegex(CSS_TEXT.replace("http://www.w3.org/2000/svg", ""), r"https?://|(?<![\w:])//[\w.-]+\.[a-z]")
+
+    def test_us1_as7_no_font_file_over_100_kb_and_none_for_chinese_is_published(self):
+        fonts = [p for p in (ROOT / "site" / "fonts").iterdir() if p.is_file() and p.suffix != ".md"]
+        self.assertTrue(fonts)
+        for path in fonts:
+            with self.subTest(font=path.name):
+                self.assertLessEqual(path.stat().st_size, FONT_LIMIT)
+                self.assertNotRegex(path.name.lower(), r"cjk|hans|han-sans|-sc-|noto-sans-sc|source-han|chinese")
+
+    def test_us1_as7_a_built_site_publishes_the_same_small_fonts(self):
+        out = _standard_cached()[1]
+        for path in (out / "fonts").glob("*.woff2"):
+            with self.subTest(font=path.name):
+                self.assertLessEqual(path.stat().st_size, FONT_LIMIT)
+        self.assertFalse(list((out / "fr").glob("*.woff2")))
+
+
+class NarrowWidthWrapping(unittest.TestCase):
+    """US1-AS14, FR-021: long German words and unspaced Chinese lines wrap instead of widening the page at 320 px. The browser
+    measurement is the venom web suite `tests/site/site-languages.yml` run by the maker; this guards the rules it depends on."""
+    WRAP = re.compile(r"overflow-wrap:\s*(?:anywhere|break-word)|word-break:\s*(?:break-word|break-all)")
+    WIDE = ("html", "body", "*", ":root")
+    NEEDS_WRAP = (".prose", ".side li a", ".toc a", ".card", ".fact", ".band h2", ".hero h1")
+    NEVER_NOWRAP = (".prose", ".side", ".toc", ".lang-menu", ".lang-dropdown", ".card", ".pager", ".fact", ".top-nav", ".fallback-notice")
+
+    def wrapping(self) -> set[str]:
+        return {s for selectors, body in css_rules() if self.WRAP.search(body) for s in selectors}
+
+    def test_d_028_no_rule_of_the_stylesheet_styles_a_draft_banner_and_the_other_two_notices_keep_theirs(self):
+        selectors = {s for rule_selectors, _ in css_rules() for s in rule_selectors}
+        self.assertEqual([s for s in selectors if "draft-banner" in s], [])
+        self.assertNotIn("draft-banner", CSS_TEXT)
+        for notice in (".fallback-notice", ".override-notice"):
+            with self.subTest(notice=notice):
+                self.assertTrue(any(notice in s for s in selectors), f"no rule for {notice}")
+
+    def test_us1_as14_every_block_of_text_wraps_a_long_word_itself_or_through_the_page(self):
+        wrapping = self.wrapping()
+        for fragment in self.NEEDS_WRAP:
+            with self.subTest(selector=fragment):
+                self.assertTrue(any(fragment in s for s in wrapping) or any(s in self.WIDE for s in wrapping),
+                                f"no rule lets {fragment} break a long word")
+
+    @staticmethod
+    def language_rules() -> list[tuple[list[str], str]]:
+        return [(selectors, body) for selectors, body in css_rules() if any(re.search(r"\.lang-(?:menu|dropdown)\b", s) for s in selectors)]
+
+    def test_us1_as14_the_language_panel_wraps_long_names_and_never_exceeds_the_viewport(self):
+        panels = [body for _, body in self.language_rules() if re.search(r"position:\s*absolute", body)]
+        self.assertTrue(panels, "no absolutely positioned rule for the language dropdown")
+        self.assertTrue(any(self.WRAP.search(body) and re.search(r"max-width:\s*calc\(100vw\s*-\s*32px\)", body) for body in panels), panels)
+
+    def test_us1_as1_the_panel_opens_under_the_summary_right_aligned_in_the_colour_tokens(self):
+        rules = self.language_rules()
+        self.assertTrue(any(re.search(r"position:\s*relative", body) and any(re.search(r"\.lang-(?:menu|dropdown)$", s) for s in selectors)
+                            for selectors, body in rules), "the panel needs a positioned parent")
+        panels = [body for _, body in rules if re.search(r"position:\s*absolute", body)]
+        self.assertTrue(any(re.search(r"(?<![\w-])right:\s*0", body) and "var(--" in body for body in panels), panels)
+
+    def test_us1_as1_the_menu_is_no_longer_a_full_width_row_under_the_top_bar(self):
+        own = [body for selectors, body in css_rules() if any(re.fullmatch(r"\.lang-menu", s) for s in selectors)]
+        for body in own:
+            with self.subTest(rule=body):
+                self.assertNotRegex(body, r"border-bottom")
+                self.assertNotIn("max-width: 1320px", body)
+
+    def test_us1_as1_the_current_language_stays_marked_in_the_panel(self):
+        self.assertTrue(any("[aria-current" in s for selectors, _ in self.language_rules() for s in selectors))
+
+    def test_us1_as14_no_text_block_is_kept_on_one_line(self):
+        for selectors, body in css_rules():
+            if re.search(r"white-space:\s*nowrap", body) and any(
+                    s.startswith(fragment) and not re.search(r"\b(?:th|td|table|pre|code)\b", s) for s in selectors for fragment in self.NEVER_NOWRAP):
+                self.fail(f"{selectors} sets white-space: nowrap")
+
+    def test_us1_as14_wide_content_scrolls_inside_its_own_box_and_the_column_can_shrink(self):
+        pre = [body for selectors, body in css_rules() if "pre" in selectors]
+        self.assertTrue(any("overflow-x: auto" in body for body in pre), pre)
+        self.assertTrue(any("overflow-x: auto" in body for selectors, body in css_rules() if "table" in selectors))
+        self.assertTrue(any("min-width: 0" in body for selectors, body in css_rules() if ".prose" in selectors))
+
+    def test_us1_as14_the_page_scales_to_the_width_of_the_screen(self):
+        for name in ("template.html", "home.html"):
+            self.assertIn('width=device-width, initial-scale=1', (ROOT / "site" / name).read_text(encoding="utf-8"))
 
 
 class ContentImages(unittest.TestCase):

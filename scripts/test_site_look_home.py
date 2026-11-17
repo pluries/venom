@@ -26,6 +26,7 @@ NOTICE = "Pluries Venom is an independent fork of ovh/venom, published under the
 UPSTREAM_URL = "https://github.com/ovh/venom"
 VOID = {"meta", "link", "br", "img", "hr", "input", "source", "area", "base", "col", "embed", "wbr", "track", "param"}
 TEXT_SUFFIXES = {".md", ".html", ".css", ".js", ".svg", ".json", ".txt", ".yml", ".yaml"}
+LANGUAGE_FOLDERS = ("fr", "de", "it", "es", "zh")
 
 
 def squash(text: str) -> str:
@@ -95,18 +96,27 @@ class FooterLinks(HTMLParser):
             self.text.append(data)
 
 
-def footer_problems(page_html: str) -> list[str]:
-    """What the footer of one built page lacks of the fork notice (empty when complete)."""
+def footer_problems(page_html: str, notice: str = NOTICE) -> list[str]:
+    """What the footer of one built page lacks of the fork notice (empty when complete); `notice` is the sentence of the page's language."""
     parser = FooterLinks()
     parser.feed(page_html)
     problems = []
-    if NOTICE not in squash("".join(parser.text)):
+    if notice not in squash("".join(parser.text)):
         problems.append("the fork notice is missing")
     if UPSTREAM_URL not in parser.hrefs:
         problems.append("no link to upstream")
     if not any(h.endswith("/LICENSE") for h in parser.hrefs):
         problems.append("no link to the licence")
     return problems
+
+
+def notice_of(rel: str, root: Path = ROOT) -> str:
+    """The fork sentence a built page must carry: English at the root, the `footer_notice` of its language under a language folder."""
+    first = rel.replace("\\", "/").split("/")[0]
+    if first not in LANGUAGE_FOLDERS:
+        return NOTICE
+    ui = json.loads((root / "site" / "i18n" / first / "ui.json").read_text(encoding="utf-8"))
+    return ui["footer_notice"]
 
 
 def old_name_files(root: Path, files: list[Path]) -> list[str]:
@@ -136,6 +146,12 @@ class Real(unittest.TestCase):
 
     def pages(self) -> dict[str, str]:
         return {p.name: p.read_text(encoding="utf-8") for p in sorted(self.out().glob("*.html"))}
+
+    def all_pages(self) -> dict[str, str]:
+        """Every page of the build, English at the root and each language in its folder, by path (not the HTML files of `images/`)."""
+        out = self.out()
+        return {p.relative_to(out).as_posix(): p.read_text(encoding="utf-8") for p in sorted(out.rglob("*.html"))
+                if p.relative_to(out).parts[0] not in ("images", "fonts", "img")}
 
     def run_lines(self) -> list[str]:
         self.assertTrue(RUN_OUTPUT.is_file(), "site/examples/run-output.txt does not exist")
@@ -229,18 +245,33 @@ class RunOutput(Real):
 
 class Footer(Real):
     def test_every_built_page_carries_the_notice_and_the_links(self):
-        pages = self.pages()
+        pages = self.all_pages()
         self.assertIn("index.html", pages)
         for name, page in pages.items():
             with self.subTest(page=name):
+                self.assertEqual(footer_problems(page, notice_of(name)), [])
+
+    def test_the_english_pages_keep_the_english_sentence_whatever_the_languages(self):
+        for name, page in self.pages().items():
+            with self.subTest(page=name):
                 self.assertEqual(footer_problems(page), [])
+
+    def test_the_notice_of_a_language_is_the_footer_notice_of_its_ui_file_and_the_english_one_is_the_required_sentence(self):
+        self.assertEqual(notice_of("quickstart.html"), NOTICE)
+        english = json.loads((ROOT / "site" / "i18n" / "en" / "ui.json").read_text(encoding="utf-8"))["footer_notice"]
+        self.assertEqual(english, NOTICE + ".")
+        for code in LANGUAGE_FOLDERS:
+            if (ROOT / "site" / "i18n" / code / "ui.json").is_file():
+                with self.subTest(code=code):
+                    self.assertNotEqual(notice_of(f"{code}/index.html"), NOTICE)
+                    self.assertIn("Apache-2.0", notice_of(f"{code}/index.html"))
 
     def test_a_page_without_the_footer_is_reported(self):
         self.assertEqual(len(footer_problems('<html><body><footer><a href="x">x</a></footer></body></html>')), 3)
         self.assertEqual(len(footer_problems("<html><body><p>x</p></body></html>")), 3)
 
     def test_no_ovh_logo_file_is_published_under_site(self):
-        found = [str(p.relative_to(ROOT)) for p in (ROOT / "site").rglob("*") if p.is_file() and "ovh" in p.name.lower()]
+        found = [str(p.relative_to(ROOT)) for p in (ROOT / "site").rglob("*") if p.is_file() and p.suffix != ".md" and "ovh" in p.name.lower()]  # the ovhapi pages are text, not a logo
         self.assertEqual(found, [])
 
 
@@ -252,9 +283,14 @@ class OldName(Real):
 
     def test_no_built_file_names_the_old_project(self):
         out = self.out()
-        files = [p for p in out.rglob("*") if p.is_file() and p.suffix in (".html", ".css", ".js", ".svg", ".json")]
+        files = [p for p in out.rglob("*") if p.is_file() and p.suffix in (".html", ".css", ".js", ".svg", ".json", ".txt")]
         self.assertTrue(files)
         self.assertEqual(old_name_files(out, files), [])
+
+    def test_no_source_file_of_a_translation_names_the_old_project(self):
+        files = [p for p in (ROOT / "site" / "i18n").rglob("*") if p.is_file() and p.suffix in TEXT_SUFFIXES]
+        self.assertTrue(files)
+        self.assertEqual(old_name_files(ROOT, files), [])
 
     def test_the_site_scripts_do_not_name_the_old_project(self):
         files = [p for p in (ROOT / "scripts").glob("*site*.py") if not p.name.startswith("test_")]
@@ -297,6 +333,32 @@ class Titles(Real):
             for content in re.findall(r"""<meta[^>]+(?:og:site_name|application-name)[^>]*content=["']([^"']*)""", page):
                 with self.subTest(page=name):
                     self.assertEqual(content, "Pluries Venom")
+
+
+class LanguageFooters(unittest.TestCase):
+    """US1-AS4: the footer check is made in the language of the page; the check itself is proven on a page that carries a marked sentence."""
+    FRENCH = "[fr] " + NOTICE + "."
+
+    def page(self, sentence: str) -> str:
+        return (f'<footer><span>{sentence} <a href="{UPSTREAM_URL}">Upstream</a> · <a href="https://github.com/pluries/venom/blob/main/LICENSE">Licence</a>'
+                '</span></footer>')
+
+    def test_a_language_page_passes_with_its_own_sentence_and_fails_with_the_english_one(self):
+        self.assertEqual(footer_problems(self.page(self.FRENCH), self.FRENCH), [])
+        self.assertEqual(footer_problems(self.page(NOTICE + "."), self.FRENCH), ["the fork notice is missing"])
+
+    def test_the_english_default_still_demands_the_english_sentence(self):
+        self.assertEqual(footer_problems(self.page(NOTICE + ".")), [])
+        self.assertEqual(footer_problems(self.page(self.FRENCH.replace("[fr] ", "")[:-1].replace("independent", "free"))), ["the fork notice is missing"])
+
+    def test_a_page_under_a_language_folder_takes_its_sentence_from_its_ui_file(self):
+        root = Path(tempfile.mkdtemp())
+        ui = root / "site" / "i18n" / "fr"
+        ui.mkdir(parents=True)
+        (ui / "ui.json").write_text(json.dumps({"footer_notice": self.FRENCH}), encoding="utf-8")
+        self.assertEqual(notice_of("fr/guide.html", root), self.FRENCH)
+        self.assertEqual(notice_of("fr\\guide.html", root), self.FRENCH)
+        self.assertEqual(notice_of("guide.html", root), NOTICE)
 
 
 if __name__ == "__main__":

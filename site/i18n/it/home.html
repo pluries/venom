@@ -1,0 +1,102 @@
+<!--
+translates: index
+title: Pluries Venom
+description: Venom esegue test di integrazione scritti in YAML.
+fingerprint: a1161ab614406fcfae8490e0b5398e3b56fe13c92169dd92a7ef4e311541d34c
+drafted_on: 2026-11-16
+status: reviewed
+drafted_by: claude
+reviewed_by: Christian Stephan
+reviewed_on: 2026-11-16
+reviewed_fingerprint: a1161ab614406fcfae8490e0b5398e3b56fe13c92169dd92a7ef4e311541d34c
+-->
+<!doctype html>
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{site_title}}: test di integrazione scritti in YAML</title>
+<meta name="description" content="{{description}}">
+{{alternates}}
+{{head_links}}
+{{scripts}}
+<link rel="stylesheet" href="{{assets}}style.css">
+</head>
+<body class="home" data-ui="{{data_ui}}">
+<a class="skip" href="#main">{{ui_skip}}</a>
+{{topbar}}
+{{banners}}
+
+<main id="main"{{main_lang}}>
+<section class="hero"><div class="wrap-wide hero-inner">
+<p class="eyebrow">// test di integrazione, dichiarati in yaml</p>
+<h1>YAML in. <br><span class="accent">PASS</span> out.</h1>
+<p class="lead">Descrivi una test suite in un file. Venom esegue ogni step, verifica ogni assertion e ti dice quale riga è fallita.</p>
+<div class="cta">
+<a class="btn" href="quickstart.html">Guida rapida</a>
+<a class="btn-ghost" href="overview.html">Leggi la documentazione</a>
+<span class="fine">Fork indipendente di ovh/venom · Apache-2.0</span>
+</div>
+<div class="demo">
+<div class="panel"><div class="panel-title">site/examples/quickstart.yml</div>
+<pre><code><span class="k">name</span>: <span class="s">Quickstart suite</span>
+<span class="k">testcases</span>:
+  - <span class="k">name</span>: <span class="s">say hello</span>
+    <span class="k">steps</span>:
+      - <span class="k">type</span>: <span class="s">exec</span>
+        <span class="k">script</span>: <span class="s">echo "hello venom"</span>
+        <span class="k">assertions</span>:
+          - <span class="s">result.systemout ShouldContainSubstring hello</span>
+          - <span class="s">result.code ShouldEqual 0</span></code></pre></div>
+<div class="panel"><div class="panel-title">Output dell'esecuzione</div>
+<pre><code><span class="dim">$ venom run site/examples/quickstart.yml</span>
+ • Quickstart suite (site/examples/quickstart.yml)
+ 	• <span class="ok">say-hello PASS</span>
+final status: <span class="ok">PASS</span></code></pre></div>
+</div>
+<div class="facts">
+<p class="fact"><b>{{executor_count}} executor</b>HTTP, SQL, exec, gRPC, Kafka e altri</p>
+<p class="fact"><b>Un solo file</b>step, variabili e assertion in YAML</p>
+<p class="fact"><b>Nessun servizio</b>un unico binario, nessun daemon da avviare</p>
+<p class="fact"><b>Apache-2.0</b>un fork indipendente di ovh/venom</p>
+</div>
+<div class="prose"><pre><code>go build -o venom ./cmd/venom
+./venom run site/examples/quickstart.yml</code></pre></div>
+</div></section>
+
+<section class="band wrap-wide why">
+<h2>Informazioni su questo fork</h2>
+<p class="lede">Venom è uno strumento solido, e questo fork lo fa andare avanti: curato, sempre aggiornato, con nuovi executor e release che puoi verificare.</p>
+<div class="cards">
+<div class="card"><span class="tag">Manutenuto</span><h3>Qualcuno se ne occupa</h3><p>213 commit dalla release precedente. Ogni modifica supera lint, test e un quality gate SonarQube sul codice nuovo prima di essere integrata.</p></div>
+<div class="card"><span class="tag">Aggiornato</span><h3>Basi attuali</h3><p>Compilato con Go 1.27. Le vulnerabilità note nella libreria standard e nelle dipendenze vengono corrette man mano che emergono, e a ogni build viene eseguita una scansione delle vulnerabilità.</p></div>
+<div class="card"><span class="tag">Nuovi executor</span><h3>Più cose da testare</h3><p><b>mcp</b> testa i server Model Context Protocol su stdio o HTTP. <b>mobile</b> pilota le app Android e iOS tramite Appium. L'executor <b>web</b> ora funziona con Playwright.</p></div>
+<div class="card"><span class="tag">Più veloce</span><h3>Misurato, non promesso</h3><p>Un'esecuzione che riutilizza tra più step una grande risposta acquisita è 13&times; più veloce e usa circa sei volte meno memoria. <code>--parallel</code> esegue più file di test contemporaneamente: 3.4&times; con 4 worker e 5.6&times; con 8, su file che passano il tempo in attesa.</p></div>
+<div class="card"><span class="tag">Sicuro per impostazione predefinita</span><h3>Verificato, non dato per scontato</h3><p>Un unico livello TLS per ogni executor, chiavi host SSH sempre verificate e nessun aggiornamento automatico che scarichi un binario senza controllarlo.</p></div>
+<div class="card"><span class="tag">Release firmate</span><h3>Verifica ciò che esegui</h3><p>Eseguibili per Linux, macOS, Windows, FreeBSD e OpenBSD, un elenco di checksum firmato e un'immagine container disponibile in <code>ghcr.io/pluries/venom</code>.</p></div>
+</div>
+</section>
+
+<section class="band wrap-wide">
+<h2>Trova la tua strada</h2>
+{{group_cards}}
+</section>
+
+<section class="band wrap-wide">
+<h2>Dall'installazione al tuo primo report</h2>
+<ol class="path">
+<li><span class="step">Passo 1</span><h3><a href="quickstart.html">Installa</a></h3><p>Scarica un binario di release o compila la CLI dal sorgente.</p></li>
+<li><span class="step">Passo 2</span><h3><a href="quickstart.html">Scrivi una suite</a></h3><p>Descrivi in un file YAML gli step e le assertion di ogni test case.</p></li>
+<li><span class="step">Passo 3</span><h3><a href="quickstart.html">Eseguila</a></h3><p>Lancia <code>venom run</code> su un file o su una cartella di suite.</p></li>
+<li><span class="step">Passo 4</span><h3><a href="quickstart.html">Leggi il report</a></h3><p>Ottieni il risultato sulla console oppure come file JSON, XML o HTML.</p></li>
+</ol>
+</section>
+
+<section class="band wrap-wide home-docs">
+{{content}}
+</section>
+</main>
+
+<footer class="foot"><div class="wrap-wide"><span>{{ui_footer_notice}} <a href="https://github.com/ovh/venom">{{ui_footer_upstream}}</a> · <a href="https://github.com/pluries/venom/blob/main/LICENSE">{{ui_footer_licence}}</a></span><a href="https://github.com/pluries/venom">github.com/pluries/venom</a></div></footer>
+</body>
+</html>

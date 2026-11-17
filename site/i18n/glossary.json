@@ -1,0 +1,10 @@
+{
+  "verbatim": ["venom", "executor", "assertion"],
+  "forbidden": {
+    "fr": {"executor": ["exécuteur", "executeur"]},
+    "de": {"executor": ["Ausführer"]},
+    "it": {"executor": ["esecutore"]},
+    "es": {"executor": ["ejecutor"]},
+    "zh": {"executor": ["执行器"]}
+  }
+}

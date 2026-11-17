@@ -62,6 +62,22 @@ class T1DigestTests(unittest.TestCase):
         self.assertEqual(kinds(read_real(), *self.KINDS), [])
 
 
+class T9LanguagesTests(unittest.TestCase):
+    """Spec 013, US5-AS2 and US5-AS4, FR-022, FR-024, D-017: the image build is the publish build. It copies the translations with
+    `site/`, runs the plain build (which refuses an enabled language that is not ready) and never previews a disabled language."""
+
+    def build_lines(self) -> list[str]:
+        return [line for line in read_real().splitlines() if line.strip().upper().startswith("RUN") and "build_site.py" in line]
+
+    def test_us5_as4_the_real_dockerfile_runs_the_build_once_and_without_the_preview_option(self):
+        lines = self.build_lines()
+        self.assertEqual(len(lines), 1, lines)
+        self.assertNotIn("preview", lines[0].lower())
+
+    def test_us5_as2_the_real_dockerfile_copies_site_with_its_translations_into_the_build_stage(self):
+        self.assertRegex(read_real(), r"(?m)^COPY\s+site/\s+site/\s*$")
+
+
 class T2StagesTests(unittest.TestCase):
     KINDS = ("stages", "copy", "add")
 

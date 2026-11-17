@@ -2,6 +2,7 @@
 """Tests of the live check of the deployed site (story #3623, task #3678).
 LiveCheck covers AC-1, AC-2, FR-01, FR-02, FR-07, SC-01: scripts/check-site.sh checks the home page and its marker,
 the certificate lifetime, the http to https redirect, the absence of cookies and the Content-Security-Policy header.
+LanguageLiveCheck (spec 013, T120) covers US5-AS1, FR-022, SC-006: the probes per language.
 A local http.server on 127.0.0.1 plays the site and a stub openssl plays the certificate. Offline, standard library
 only. Run: python scripts/test_site_live_check.py
 """
@@ -86,7 +87,11 @@ def file_response(config: dict, path: str) -> tuple:
     return status, body, ({"Content-Type": content_type} if content_type else {})
 
 
-def stub_response(config: dict, path: str) -> tuple:
+def stub_response(config: dict, path: str, accept_language: str = "") -> tuple:
+    if accept_language and path in config.get("accept_routes", {}):
+        return config["accept_routes"][path]
+    if path in config.get("routes", {}):
+        return config["routes"][path]
     if path == "/":
         return config["home_status"], config["home_body"], config["home_headers"]
     if path in config.get("files", {}):
@@ -111,7 +116,7 @@ def make_handler(config: dict):
             self.wfile.write(payload)
 
         def do_GET(self):
-            self.answer(*stub_response(config, self.path))
+            self.answer(*stub_response(config, self.path, self.headers.get("Accept-Language", "")))
 
         def do_POST(self):
             self.rfile.read(int(self.headers.get("Content-Length") or 0))
@@ -140,7 +145,7 @@ class Result:
         self.fail_lines = [line for line in self.lines if line.startswith("FAIL - ")]
 
 
-def run_check(config: dict, days: int = 60) -> Result:
+def run_check(config: dict, days: int = 60, extra_env: dict | None = None) -> Result:
     server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(config))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -156,6 +161,7 @@ def run_check(config: dict, days: int = 60) -> Result:
             env["CHECK_SITE_HTTPS_URL"] = base
             env["CHECK_SITE_HTTP_URL"] = base
             env["CHECK_SITE_CERT_ENDPOINT"] = "127.0.0.1:443"
+            env.update(extra_env or {})
             completed = subprocess.run([BASH, SCRIPT.as_posix(), HOST], cwd=ROOT, env=env, capture_output=True,
                                        text=True, encoding="utf-8", timeout=60)
             return Result(completed)
@@ -336,6 +342,208 @@ class LiveCheck(unittest.TestCase):
         self.assertNotIn("check-site: PASS", result.lines)
         self.assertNotIn("check-site: FAIL", result.lines)
         self.assertEqual(result.ok_lines, [], result.output)
+
+
+# ---------- Spec 013, task T120: the live check proves every language (US5-AS1, FR-022, SC-006) ----------
+# The languages come from the served site: the home page names each of them in `<link rel="alternate" hreflang href>` and in its
+# language control; the address prefix is the first folder of the address. `CHECK_SITE_LANGUAGES` (address prefixes separated by
+# spaces) forces the list, so a home page that stops advertising a language fails the check instead of dropping its probes.
+LANGUAGE_PATHS = {"fr": "fr", "zh": "zh-Hans"}
+UNKNOWN = "/xx/"
+CONTENT_SECURITY = {"Content-Security-Policy": CSP}
+
+
+def alternate_links(languages: dict) -> str:
+    links = [f'<link rel="alternate" hreflang="x-default" href="https://{HOST}/index.html">',
+             f'<link rel="alternate" hreflang="en" href="https://{HOST}/index.html">']
+    links += [f'<link rel="alternate" hreflang="{attr}" href="https://{HOST}/{prefix}/index.html">' for prefix, attr in languages.items()]
+    return "".join(links)
+
+
+def language_control(languages: dict) -> str:
+    items = [f'<a href="{prefix}/index.html" lang="{attr}" hreflang="{attr}">{prefix}</a>' for prefix, attr in languages.items()]
+    return ('<nav class="lang-menu" lang="en"><details class="lang-dropdown"><summary><span class="lang-current">English</span></summary>'
+            '<a href="index.html" lang="en" hreflang="en" aria-current="true">English</a>' + "".join(items) + "</details></nav>")
+
+
+def page_of(lang: str, links: str, body: str = "") -> str:
+    return f'<!doctype html><html lang="{lang}"><head><title>{MARKER}</title>{links}</head><body>{body}</body></html>'
+
+
+def language_config(languages: dict | None = None) -> dict:
+    """A healthy site that serves English and the given languages (prefix -> `lang` attribute), 404 for `/xx/`, English to a reader
+    who sends `Accept-Language: de`, and a 301 from `/fr` to `/fr/`."""
+    languages = LANGUAGE_PATHS if languages is None else languages
+    config = default_config()
+    links = alternate_links(languages)
+    config["home_body"] = page_of("en", links, language_control(languages))
+    config["accept_routes"] = {"/": (200, config["home_body"], {})}
+    routes = {UNKNOWN: (404, "", {})}
+    for prefix, attr in languages.items():
+        routes[f"/{prefix}"] = (301, "", {"Location": f"/{prefix}/"})
+        routes[f"/{prefix}/"] = (200, page_of(attr, links), dict(CONTENT_SECURITY))
+        for name, (status, content_type, body) in default_files().items():
+            routes[f"/{prefix}{name}"] = (status, body, {"Content-Type": content_type})
+    config["routes"] = routes
+    return config
+
+
+def named(path: str) -> str:
+    """A pattern for a line that names `path` as an address, not as the start of a longer one (`/fr` is not `/fr/` or `/fr/llms.txt`)."""
+    return re.escape(path) + r"(?![\w./-])"
+
+
+def probes_of(prefix: str) -> list[str]:
+    return [f"/{prefix}/", f"/{prefix}/search-index.json", f"/{prefix}/llms.txt", f"/{prefix}/llms-full.txt", f"/{prefix}"]
+
+
+@unittest.skipUnless(BASH and CURL and GNU_DATE, "bash, curl or GNU date is not available")
+class LanguageLiveCheck(unittest.TestCase):
+    """T120. Each probe prints one `ok - ` or `FAIL - ` line that names the address it asked for, as the existing probes do."""
+
+    def assert_one_failure(self, result: Result, *patterns: str):
+        self.assertEqual(result.returncode, 1, result.output)
+        self.assertEqual(len(result.fail_lines), 1, result.output)
+        for pattern in patterns:
+            self.assertRegex(result.fail_lines[0], re.compile(pattern, re.IGNORECASE))
+        self.assertEqual(result.lines[-1], "check-site: FAIL")
+
+    def oks_naming(self, result: Result, path: str) -> list[str]:
+        return [line for line in result.ok_lines if re.search(named(path), line)]
+
+    def changed(self, edit, languages: dict | None = None, **options) -> Result:
+        config = language_config(languages)
+        edit(config)
+        return run_check(config, **options)
+
+    def test_us5_as1_a_healthy_site_passes_and_every_probe_of_every_language_is_reported(self):
+        result = run_check(language_config())
+        self.assertEqual(result.returncode, 0, result.output)
+        self.assertEqual(result.fail_lines, [], result.output)
+        self.assertEqual(result.lines[-1], "check-site: PASS")
+        for prefix in LANGUAGE_PATHS:
+            for path in probes_of(prefix):
+                with self.subTest(path=path):
+                    self.assertEqual(len(self.oks_naming(result, path)), 1, result.output)
+        self.assertEqual(len(self.oks_naming(result, UNKNOWN)), 1, result.output)
+        self.assertEqual(len([line for line in result.ok_lines if "accept-language" in line.lower()]), 1, result.output)
+        self.assertGreaterEqual(len(result.ok_lines), HEALTHY_OKS + 5 * len(LANGUAGE_PATHS) + 2, result.output)
+
+    def test_us5_as1_a_language_home_page_that_does_not_answer_200_fails(self):
+        for status in (404, 500):
+            with self.subTest(status=status):
+                result = self.changed(lambda c: c["routes"].update({"/fr/": (status, "", {})}))
+                self.assert_one_failure(result, named("/fr/"), rf"\b{status}\b")
+
+    def test_us5_as1_a_language_home_page_with_the_wrong_lang_attribute_fails(self):
+        for prefix, wrong in (("fr", "en"), ("zh", "zh")):
+            with self.subTest(language=prefix):
+                body = page_of(wrong, alternate_links(LANGUAGE_PATHS))
+                result = self.changed(lambda c: c["routes"].update({f"/{prefix}/": (200, body, dict(CONTENT_SECURITY))}))
+                self.assert_one_failure(result, named(f"/{prefix}/"), r"lang")
+
+    def test_us5_as1_a_language_home_page_without_its_alternate_links_fails(self):
+        full = alternate_links(LANGUAGE_PATHS)
+        cases = (("no link at all", "", "hreflang"),
+                 ("no x-default", full.replace('hreflang="x-default"', 'hreflang="en"'), "x-default"),
+                 ("no link to the other language", full.replace('hreflang="zh-Hans"', 'hreflang="ja"'), "zh-Hans"))
+        for name, links, word in cases:
+            with self.subTest(case=name):
+                body = page_of("fr", links)
+                result = self.changed(lambda c: c["routes"].update({"/fr/": (200, body, dict(CONTENT_SECURITY))}))
+                self.assert_one_failure(result, named("/fr/"), word)
+
+    def test_us5_as1_a_language_file_that_does_not_answer_200_fails_and_is_named(self):
+        for prefix in LANGUAGE_PATHS:
+            for name in FILES:
+                with self.subTest(language=prefix, file=name):
+                    path = f"/{prefix}/{name}"
+                    result = self.changed(lambda c: c["routes"].update({path: (500, "", {"Content-Type": "text/plain; charset=utf-8"})}))
+                    self.assert_one_failure(result, named(path), r"\b500\b")
+
+    def test_us5_as1_a_language_text_file_without_utf_8_fails(self):
+        for name in TEXT_FILES:
+            with self.subTest(file=name):
+                path = f"/zh/{name}"
+                result = self.changed(lambda c: c["routes"].update({path: (200, "# Pluries Venom\n", {"Content-Type": "text/plain"})}))
+                self.assert_one_failure(result, named(path), r"utf-8")
+
+    def test_us5_as1_a_language_address_without_its_slash_must_redirect_to_the_slash(self):
+        cases = (("no redirect, 200 served in place", (200, page_of("fr", alternate_links(LANGUAGE_PATHS)), {})),
+                 ("404", (404, "", {})), ("302", (302, "", {"Location": "/fr/"})),
+                 ("another folder", (301, "", {"Location": "/de/"})),
+                 ("another host", (301, "", {"Location": "https://other.example.test/fr/"})))
+        for name, answer in cases:
+            with self.subTest(case=name):
+                self.assert_one_failure(self.changed(lambda c: c["routes"].update({"/fr": answer})), named("/fr"))
+
+    def test_us5_as1_a_redirect_to_the_absolute_address_of_the_same_host_is_accepted(self):
+        result = self.changed(lambda c: c["routes"].update({"/fr": (301, "", {"Location": f"https://{HOST}/fr/"})}))
+        self.assertEqual(result.returncode, 0, result.output)
+        self.assertEqual(len(self.oks_naming(result, "/fr")), 1, result.output)
+
+    def test_us5_as1_a_path_under_a_language_that_does_not_exist_must_answer_404(self):
+        for status in (200, 403, 301):
+            with self.subTest(status=status):
+                result = self.changed(lambda c: c["routes"].update({UNKNOWN: (status, "", {})}))
+                self.assert_one_failure(result, named(UNKNOWN), rf"\b{status}\b")
+
+    def german_reader(self, answer: tuple) -> Result:
+        return self.changed(lambda c: c["accept_routes"].update({"/": answer}))
+
+    def test_us5_as1_a_reader_who_asks_for_german_gets_the_english_page_unchanged(self):
+        result = self.german_reader((200, page_of("en", alternate_links(LANGUAGE_PATHS)), {"Vary": "Accept-Encoding"}))
+        self.assertEqual(result.returncode, 0, result.output)
+        self.assertEqual(len([line for line in result.ok_lines if "accept-language" in line.lower()]), 1, result.output)
+
+    def test_us5_as1_the_site_must_not_pick_a_language_from_the_accept_language_header(self):
+        english = page_of("en", alternate_links(LANGUAGE_PATHS))
+        cases = (("a redirect to the German folder", (302, "", {"Location": "/de/"}), r"accept-language|redirect"),
+                 ("the French page", (200, page_of("fr", alternate_links(LANGUAGE_PATHS)), {}), r"accept-language|lang"),
+                 ("a cookie", (200, english, {"Set-Cookie": "lang=de"}), r"cookie"),
+                 ("a Vary on the language", (200, english, {"Vary": "Accept-Language"}), r"vary"),
+                 ("a Vary on the language next to another", (200, english, {"Vary": "Accept-Encoding, Accept-Language"}), r"vary"),
+                 ("an error", (500, "", {}), r"accept-language|\b500\b"))
+        for name, answer, pattern in cases:
+            with self.subTest(case=name):
+                self.assert_one_failure(self.german_reader(answer), pattern)
+
+    def test_us5_as1_a_language_not_advertised_by_the_home_page_is_not_probed(self):
+        result = run_check(language_config({"fr": "fr"}))
+        self.assertEqual(result.returncode, 0, result.output)
+        self.assertEqual(len(self.oks_naming(result, "/fr/")), 1, result.output)
+        self.assertEqual(self.oks_naming(result, "/zh/"), [], result.output)
+
+    def test_us5_as1_a_home_page_that_advertises_no_language_has_no_language_probe(self):
+        """Characterization: the healthy default site keeps its count of ok lines."""
+        result = run_check(default_config())
+        self.assertEqual(result.returncode, 0, result.output)
+        self.assertEqual(len(result.ok_lines), HEALTHY_OKS, result.output)
+        self.assertEqual(self.oks_naming(result, UNKNOWN), [], result.output)
+
+    def test_us5_as1_a_forced_list_is_probed_and_a_language_the_home_page_does_not_advertise_fails(self):
+        result = run_check(language_config(), extra_env={"CHECK_SITE_LANGUAGES": "fr zh"})
+        self.assertEqual(result.returncode, 0, result.output)
+        self.assertEqual(len(self.oks_naming(result, "/zh/llms.txt")), 1, result.output)
+        for forced, config in (("fr zh de", language_config()), ("fr", default_config())):
+            result = run_check(config, extra_env={"CHECK_SITE_LANGUAGES": forced})
+            with self.subTest(forced=forced):
+                self.assertEqual(result.returncode, 1, result.output)
+                missing = forced.split()[-1]
+                self.assertTrue(any(re.search(rf"\b{missing}\b", line) for line in result.fail_lines), result.output)
+
+    def test_us5_as1_the_existing_checks_still_fail_on_a_site_with_languages(self):
+        """Characterization: the Content-Security-Policy and the redirect checks of the English site stay."""
+        self.assert_one_failure(self.changed(lambda c: c.update({"home_headers": {}})), r"content-security-policy|csp")
+        self.assert_one_failure(self.changed(lambda c: c.update({"redirect_status": 302})), r"301|redirect")
+
+    def test_sc_006_a_set_cookie_on_any_language_response_fails(self):
+        for path in ("/fr/", "/zh/llms.txt", "/fr/search-index.json", "/fr"):
+            with self.subTest(path=path):
+                def edit(config):
+                    status, body, headers = config["routes"][path]
+                    config["routes"][path] = (status, body, {**headers, "Set-Cookie": "lang=fr"})
+                self.assert_one_failure(self.changed(edit), r"cookie")
 
 
 if __name__ == "__main__":

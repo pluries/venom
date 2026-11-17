@@ -24,6 +24,8 @@ UPSTREAM_URL = "https://github.com/ovh/venom"
 EXAMPLE = "site/examples/quickstart.yml"
 SCRIPT = "scripts/check-site-example.sh"
 GROUPS = ("Getting started", "Concepts", "Guides", "Executors", "Reference")
+LANGUAGE_FOLDERS = ("fr", "de", "it", "es", "zh")
+INCLUDE = re.compile(rf"(?m)^\{{\{{include {re.escape(EXAMPLE)} yaml\}}\}}\s*$")
 SIDE_GROUP = re.compile(r'<div class="side-group"><details[^>]*><summary>(.*?)</summary><ul>(.*?)</ul></details></div>', re.S)
 
 
@@ -42,6 +44,17 @@ def build_real(out: Path) -> tuple[int, str, str]:
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
         code = bs.main(["--root", str(ROOT), "--out", str(out)])
     return code, stdout.getvalue(), stderr.getvalue()
+
+
+def built_pages(out: Path) -> dict[str, str]:
+    """Every page of a build, English at the root and each language in its folder, by path (not the HTML files of `images/`)."""
+    return {p.relative_to(out).as_posix(): p.read_text(encoding="utf-8") for p in sorted(out.rglob("*.html"))
+            if p.relative_to(out).parts[0] not in ("images", "fonts", "img")}
+
+
+def example_blocks(page_html: str) -> list[str]:
+    """The text of each code block of a built page."""
+    return [html.unescape(body).replace("\r\n", "\n") for body in re.findall(r"<pre><code[^>]*>(.*?)</code></pre>", page_html, re.S)]
 
 
 def sidebar_groups(page_html: str) -> dict[str, list[str]]:
@@ -216,8 +229,15 @@ class HomeAndSite(RealSite):
 
     def test_no_page_keeps_an_unresolved_placeholder(self):
         self.built("index.html")
-        offenders = [p.name for p in self.out.glob("*.html") if re.search(r"\{\{\s*[\w.-]+\s*\}\}", p.read_text(encoding="utf-8"))]
+        offenders = [name for name, text in built_pages(self.out).items() if re.search(r"\{\{\s*[\w.-]+\s*\}\}", text)]
         self.assertEqual(offenders, [])
+
+    def test_the_build_counts_the_pages_of_every_language_folder_it_wrote(self):
+        counted = re.search(r"built (\d+) page", self.stdout)
+        self.assertIsNotNone(counted, self.stdout)
+        self.assertEqual(int(counted.group(1)), len(built_pages(self.out)))
+        self.assertEqual(sorted(built_pages(self.out)), sorted({f"{p.name}" for p in self.out.glob("*.html")} | {
+            p.relative_to(self.out).as_posix() for p in self.out.glob("*/*.html") if p.parent.name in LANGUAGE_FOLDERS}))
 
     def test_the_home_page_and_the_quickstart_name_the_independent_fork_and_link_upstream(self):
         for name in ("index.html", "quickstart.html"):
@@ -229,6 +249,54 @@ class HomeAndSite(RealSite):
         source = ROOT / "site" / "pages" / "index.md"
         self.assertTrue(source.is_file(), "site/pages/index.md does not exist")
         self.assertIn("independent fork", source.read_text(encoding="utf-8").lower())
+
+
+def holds_example(page_html: str) -> bool:
+    expected = (ROOT / EXAMPLE).read_text(encoding="utf-8").replace("\r\n", "\n").strip("\n")
+    return any(expected in block for block in example_blocks(page_html))
+
+
+class TranslatedQuickstart(unittest.TestCase):
+    """US1-AS4, US3-AS2: the walk over the pages includes the language folders; a translated page shows the English example byte for
+    byte, because its text includes the example file or repeats it exactly."""
+    ENGLISH = "# Guide\n\nRun it.\n\n{{include site/examples/quickstart.yml yaml}}\n"
+
+    def build(self, french_body: str) -> Path:
+        from test_site_i18n import FR_FILES, build_all, i18n_repo, translation
+        sources = {"site/pages/guide.md": self.ENGLISH, EXAMPLE: (ROOT / EXAMPLE).read_text(encoding="utf-8")}
+        files = {**FR_FILES, "site/i18n/fr/guide.md": translation("guide", "Guide FR", french_body)}
+        errors, out = build_all(i18n_repo(files=files, sources=sources))
+        self.assertEqual(errors, [])
+        return out
+
+    def test_a_translated_page_that_includes_the_example_shows_it_as_the_english_page_does(self):
+        out = self.build("# Guide FR {#guide}\n\nLancez-le.\n\n{{include site/examples/quickstart.yml yaml}}\n")
+        pages = built_pages(out)
+        self.assertTrue({"guide.html", "fr/guide.html"} <= set(pages), sorted(pages))
+        for name in ("guide.html", "fr/guide.html"):
+            with self.subTest(page=name):
+                self.assertTrue(holds_example(pages[name]))
+        self.assertIn("Lancez-le.", pages["fr/guide.html"])
+
+    def test_a_translated_page_that_repeats_the_example_exactly_shows_it_too(self):
+        text = (ROOT / EXAMPLE).read_text(encoding="utf-8").replace("\r\n", "\n").strip("\n")
+        out = self.build("# Guide FR {#guide}\n\nLancez-le.\n\n```yaml\n" + text + "\n```\n")
+        self.assertTrue(holds_example(built_pages(out)["fr/guide.html"]))
+
+    def test_a_translated_page_whose_example_differs_by_one_character_is_detected(self):
+        text = (ROOT / EXAMPLE).read_text(encoding="utf-8").replace("\r\n", "\n").strip("\n").replace("hello", "hallo", 1)
+        out = self.build("# Guide FR {#guide}\n\nLancez-le.\n\n```yaml\n" + text + "\n```\n")
+        self.assertTrue(holds_example(built_pages(out)["guide.html"]))
+        self.assertFalse(holds_example(built_pages(out)["fr/guide.html"]))
+
+    def test_the_quickstart_of_every_language_that_exists_includes_the_example_or_repeats_it_exactly(self):
+        expected = (ROOT / EXAMPLE).read_text(encoding="utf-8").replace("\r\n", "\n").strip("\n")
+        for code in LANGUAGE_FOLDERS:
+            path = ROOT / "site" / "i18n" / code / "quickstart.md"
+            if path.is_file():
+                text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+                with self.subTest(code=code):
+                    self.assertTrue(INCLUDE.search(text) or expected in text, f"site/i18n/{code}/quickstart.md shows another example")
 
 
 if __name__ == "__main__":

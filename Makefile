@@ -43,7 +43,7 @@ $(ALL_RESULTS_TARGETS):
 	$(info copying $(call get_results_from_target, $@) to $@)
 	@cp -f $(call get_results_from_target, $@) $@
 
-.PHONY: build lint clean testrun test dist test-xunit package site site-check site-image site-image-check
+.PHONY: build lint clean testrun test dist test-xunit package site site-preview site-i18n-status site-check site-image site-image-check
 
 build: ## build all components and push them into dist directory
 	$(info Building Component venom)
@@ -90,6 +90,12 @@ PYTHON ?= python3
 
 site: ## build the documentation site into build/site and check it (no private path, no foreign request, no cookie)
 	$(PYTHON) scripts/build_site.py --out build/site
+
+site-preview: ## build the site with the languages that are not enabled yet (to review them); never for the published site
+	$(PYTHON) scripts/build_site.py --out build/site --preview-languages fr,de,it,es,zh
+
+site-i18n-status: ## count the pages machine-drafted, reviewed, stale and missing in each language
+	$(PYTHON) scripts/site_i18n.py status
 
 site-check: site ## build the site, then run the example check of the quickstart against it
 	bash scripts/check-site-example.sh

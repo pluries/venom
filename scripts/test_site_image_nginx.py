@@ -24,6 +24,7 @@ SECRET_AND_LOG_PATHS = (
 KEPT_PATHS = (
     "dist/venom.linux-amd64", "site", "site/fonts/inter.woff2", "site/index.html", "scripts/build_site.py",
     "executors/http/http.go", "README.md", "LICENSE", "deploy", "deploy/site/nginx.conf",
+    "site/i18n/fr/ui.json", "site/i18n/zh/index.md", "site/i18n/glossary.json", "site/i18n/reviewers.txt", "site/i18n/overrides.json",
 )
 
 
@@ -218,6 +219,77 @@ class CspMatchesStylesheetTests(unittest.TestCase):
         problems = csp_problems(policy, set(), set())
         self.assertEqual(problems, ["img-src is open to https:", "img-src is open to *",
                                     "img-src is open to cdn.example", "script-src has 'unsafe-inline'"])
+
+
+def language_location(conf: str) -> tuple[str, str] | None:
+    """(the regular expression, the body) of the `location ~ ...` block that names the language folders, or None."""
+    for pattern, body in re.findall(r"location\s+~\s+(\S+)\s*\{([^}]*)\}", conf):
+        if re.search(r"\bfr\b", pattern) and re.search(r"\bzh\b", pattern):
+            return pattern, body
+    return None
+
+
+class LanguageFolderTests(unittest.TestCase):
+    """T027, US1-AS13, D-010: `/fr` has no trailing slash. With `try_files $uri/` nginx serves `/fr/` from the folder without a redirect,
+    the browser stays on `/fr` and every relative link (`guide.html`, `../style.css`) resolves against `/`. The configuration must send
+    `/fr` to `/fr/`, and only that."""
+    CODES = ("fr", "de", "it", "es", "zh")
+
+    def setUp(self):
+        self.conf = read_text(NGINX_CONF)
+
+    def block(self) -> tuple[str, str]:
+        found = language_location(self.conf)
+        self.assertIsNotNone(found, "no `location ~ ^/(fr|de|it|es|zh)$` block that redirects a language folder to its slash")
+        return found
+
+    def test_T27_the_five_language_folders_without_a_slash_match_and_nothing_else_does(self):
+        regex = re.compile(self.block()[0])
+        for path in ("/fr", "/de", "/it", "/es", "/zh"):
+            with self.subTest(path=path):
+                self.assertIsNotNone(regex.search(path))
+        for path in ("/", "/fr/", "/fr/guide.html", "/fr/../", "/frx", "/xx", "/en", "/fr.html", "/guide", "//fr", "/FR", "/fr%2f"):
+            with self.subTest(path=path):
+                self.assertIsNone(regex.search(path))
+
+    def test_T27_the_match_is_anchored_at_both_ends_and_the_folder_is_captured(self):
+        pattern = self.block()[0]
+        self.assertTrue(pattern.startswith("^/") and pattern.endswith("$"), pattern)
+        self.assertEqual(re.compile(pattern).search("/zh").group(1), "zh")
+
+    def test_T27_the_answer_is_a_permanent_redirect_to_the_same_folder_with_a_slash(self):
+        self.assertEqual(re.findall(r"return\s+(\d+)\s+(\S+?)\s*;", self.block()[1]), [("301", "/$1/")])
+
+    def test_T27_the_redirect_target_takes_nothing_from_the_request_but_the_captured_folder(self):
+        body = self.block()[1]
+        for variable in ("$host", "$http_host", "$request_uri", "$uri", "$args", "$arg_", "$scheme", "$server_name", "$http_"):
+            with self.subTest(variable=variable):
+                self.assertNotIn(variable, body)
+
+    def test_T27_the_redirect_stays_relative_to_the_server_so_the_internal_port_never_shows(self):
+        self.assertIn("absolute_redirect off", directives(self.conf))
+
+    def test_T27_the_folders_named_are_the_language_folders_of_site_json_and_no_other(self):
+        import json
+        languages = json.loads(read_text("site/site.json"))["languages"]
+        folders = {entry["path"] for code, entry in languages.items() if code != "en"}
+        named = set(re.search(r"\(([^)]*)\)", self.block()[0]).group(1).split("|"))
+        self.assertEqual(named, folders)
+        self.assertEqual(named, set(self.CODES))
+
+    def test_T27_every_other_address_is_served_as_before(self):
+        items = directives(self.conf)
+        self.assertTrue(any(re.fullmatch(r"location / ?", d) for d in items))
+        self.assertIn("try_files $uri $uri.html $uri/ =404", items)
+        self.assertIn("limit_except GET HEAD", items)
+
+    def test_T27_only_the_root_block_and_the_language_block_exist(self):
+        self.block()
+        self.assertEqual(len([d for d in directives(self.conf) if d.startswith("location ")]), 2)
+
+    def test_T27_the_redirect_block_sets_no_cookie_and_proxies_nothing(self):
+        for needle in ("set-cookie", "proxy_pass", "add_header Set", "Vary"):
+            self.assertNotIn(needle.lower(), self.block()[1].lower())
 
 
 class DockerignoreTests(unittest.TestCase):

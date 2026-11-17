@@ -6,10 +6,12 @@ import sys
 import unittest
 from unittest import mock
 from pathlib import Path
+from urllib.parse import urljoin, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_site as bs  # noqa: E402
 from test_build_site import make_repo  # noqa: E402
+from test_site_i18n import LANGUAGES, build_all, i18n_repo, translation  # noqa: E402
 
 BASE = "https://docs.example.test/"
 INDEX_FILE, LLMS_FILE, FULL_FILE = "search-index.json", "llms.txt", "llms-full.txt"
@@ -317,7 +319,22 @@ class T4OverlayAccessibility(unittest.TestCase):
         self.assertIn('box.setAttribute("aria-label"', SITE_JS)
 
     def test_t4_the_input_has_an_accessible_label(self):
-        self.assertRegex(SITE_JS, r'input\.setAttribute\("aria-label", "[^"]+"\)')
+        """The label is the page's own wording (ui.search_label); a literal in the script would be overwritten or win over it."""
+        self.assertIn('input.setAttribute("aria-label", ui.search_label);', SITE_JS)
+        self.assertNotRegex(SITE_JS, r'input\.setAttribute\("aria-label", "')
+        self.assertRegex(SITE_JS, r'const DEFAULT_UI = \{[^}]*?search_label: "Search",')
+
+
+class T4InputMethodComposition(unittest.TestCase):
+    """US1-AS8: Enter that confirms a Pinyin candidate must not navigate. No test runs the script, so the guard is pinned by source."""
+
+    def test_us1_as8_the_key_handler_returns_early_while_an_ime_is_composing(self):
+        """US1-AS8."""
+        match = re.search(r"const onInputKey = \(event\) => \{(.*?)\n  \};", SITE_JS, re.S)
+        self.assertIsNotNone(match, "onInputKey not found")
+        body = match.group(1)
+        guard = re.match(r"\s*if \(event\.isComposing \|\| event\.keyCode === 229\) \{\s*return;\s*\}", body)
+        self.assertIsNotNone(guard, "onInputKey must start with: if (event.isComposing || event.keyCode === 229) { return; }")
 
     def test_t4_a_live_region_carries_the_result_count_and_the_nothing_found_message(self):
         self.assertRegex(SITE_JS, r'status\.setAttribute\("role", "status"\)|aria-live')
@@ -340,6 +357,147 @@ class T6ResultsAreOnlyText(unittest.TestCase):
         """US4-AS8."""
         self.assertIn("title.textContent = entry.title", SITE_JS)
         self.assertIn("place.textContent = section + (heading ? heading.text : entry.description);", SITE_JS)
+
+
+class T7ChineseSearchSource(unittest.TestCase):
+    """US1-AS8, FR-015, D-016. Characterization, green before and after: no test runs the script (no node in the approved stack),
+    so the two lines that decide how a Chinese query matches are pinned by their source. The browser proof is the venom web suite
+    `tests/site/site-languages.yml`, run by the maker. In the script `\\s` matches U+3000, so a full-width space separates two terms; a
+    term is matched as a substring of the page text, so a one-character term and a term inside a run of characters both match."""
+
+    def test_us1_as8_the_query_is_split_on_whitespace_only(self):
+        self.assertIn("const terms = (query) => query.toLowerCase().split(/\\s+/).filter((word) => word.length > 0);", SITE_JS)
+
+    def test_us1_as8_every_term_is_matched_as_a_substring_of_the_text(self):
+        self.assertIn("const has = (text, words) => {\n    const lower = text.toLowerCase();\n"
+                      "    return words.every((word) => lower.includes(word));\n  };", SITE_JS)
+
+    def test_us1_as8_the_text_is_not_segmented_by_word_boundaries(self):
+        for api in ("Intl.Segmenter", "\\b", "normalize("):
+            with self.subTest(api=api):
+                self.assertNotIn(api, SITE_JS)
+
+
+LANGUAGE_BASE = "https://docs.example.test"
+ENGLISH_SOURCE_LINE = re.compile(r"(?im)^(?!- \[).*\bEnglish\b.*https://docs\.example\.test/llms(?:-full)?\.txt")
+ZH = {"en": LANGUAGES["en"], "zh": {"name": "中文", "path": "zh", "lang": "zh-Hans", "enabled": True}}
+ZH_GUIDE = translation("guide", "指南", "# 指南 {#guide}\n\n运行测试，检查输出。\n\n## 第二步 {#second-step}\n\n然后检查结果。\n")
+
+
+class T022LanguageSearchFiles(unittest.TestCase):
+    """US1-AS9, FR-015, FR-016: each language folder has its own index and llms files; English keeps its own, unchanged."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.errors, cls.out = build_all(i18n_repo())
+
+    def read(self, rel: str) -> str:
+        return (self.out / rel).read_text(encoding="utf-8")
+
+    def entries(self, rel: str) -> list[dict]:
+        return json.loads(self.read(rel))
+
+    def test_us1_as9_the_build_is_clean_and_every_language_folder_has_the_three_files(self):
+        self.assertEqual(self.errors, [])
+        for name in FILES:
+            for folder in ("", "fr/"):
+                with self.subTest(file=folder + name):
+                    self.assertTrue((self.out / (folder + name)).is_file())
+
+    def test_us1_as9_the_french_index_holds_the_french_pages_only_in_site_order(self):
+        entries = self.entries("fr/search-index.json")
+        self.assertEqual([e["slug"] for e in entries], ["overview", "installing", "guide"])
+        self.assertEqual([e["title"] for e in entries], ["Apercu", "Installer", "Guide FR"])
+        self.assertIn("Texte du guide", entries[2]["text"])
+        self.assertNotIn("Guide text", entries[2]["text"])
+        for entry in entries:
+            self.assertEqual(sorted(entry), ["description", "group", "headings", "slug", "text", "title"])
+
+    def test_us1_as9_the_english_index_holds_no_french_text(self):
+        english = self.read("search-index.json")
+        self.assertNotIn("Texte du guide", english)
+        self.assertEqual([e["slug"] for e in self.entries("search-index.json")], ["index", "overview", "installing", "guide", "other"])
+
+    def test_us1_as9_the_headings_of_a_french_entry_carry_the_english_anchors(self):
+        guide = self.entries("fr/search-index.json")[2]
+        self.assertEqual([h["anchor"] for h in guide["headings"]], ["local-part", "extra-details"])
+        self.assertEqual([h["text"] for h in guide["headings"]], ["Partie locale", "Details en plus"])
+
+    def test_us1_as9_the_page_of_a_language_loads_the_index_of_its_own_folder(self):
+        self.assertIn('fetch("search-index.json")', SITE_JS)
+        for rel in ("fr/guide.html", "fr/index.html", "guide.html"):
+            with self.subTest(page=rel):
+                target = urlsplit(urljoin(f"{LANGUAGE_BASE}/{rel}", "search-index.json")).path.lstrip("/")
+                self.assertEqual(target, rel.rsplit("/", 1)[0] + "/search-index.json" if "/" in rel else "search-index.json")
+                self.assertTrue((self.out / target).is_file())
+
+    def test_us1_as9_a_result_links_to_a_page_of_its_own_folder_by_a_relative_address(self):
+        self.assertIn("link.href = `${entry.slug}.html${fragment}`;", SITE_JS)
+
+    def test_fr_016_the_llms_txt_of_a_language_links_its_pages_with_the_addresses_of_its_folder(self):
+        text = self.read("fr/llms.txt")
+        self.assertEqual([line for line in text.splitlines() if line.startswith("- ")], [
+            f"- [Apercu]({LANGUAGE_BASE}/fr/overview.html): Description de Apercu.",
+            f"- [Installer]({LANGUAGE_BASE}/fr/installing.html): Description de Installer.",
+            f"- [Guide FR]({LANGUAGE_BASE}/fr/guide.html): Description de Guide FR.",
+        ])
+        self.assertEqual(text.splitlines()[0], "# T")
+
+    def test_fr_016_the_llms_files_of_a_language_name_the_english_source(self):
+        for name in ("fr/llms.txt", "fr/llms-full.txt"):
+            with self.subTest(file=name):
+                self.assertRegex(self.read(name), ENGLISH_SOURCE_LINE)
+
+    def test_fr_016_the_english_llms_files_are_unchanged_and_name_no_other_source(self):
+        for name in ("llms.txt", "llms-full.txt"):
+            with self.subTest(file=name):
+                self.assertNotRegex(self.read(name), ENGLISH_SOURCE_LINE)
+                self.assertNotIn("/fr/", self.read(name))
+        self.assertEqual([line for line in self.read("llms.txt").splitlines() if line.startswith("- ")][:2], [
+            f"- [Home]({LANGUAGE_BASE}/index.html): The home page.", f"- [Overview]({LANGUAGE_BASE}/overview.html): What it is."])
+
+    def test_fr_016_llms_full_of_a_language_holds_the_text_of_its_pages_and_none_of_the_english_ones(self):
+        full = self.read("fr/llms-full.txt")
+        for needle in ("Texte introductif", "Installez.", "Texte du guide"):
+            self.assertIn(needle, full)
+        for english in ("Intro text of the overview", "Install the thing.", "Guide text"):
+            self.assertNotIn(english, full)
+
+    def test_fr_015_the_files_of_every_language_stay_under_the_stated_limit(self):
+        for rel in ("fr/search-index.json", "fr/llms-full.txt"):
+            with self.subTest(file=rel):
+                self.assertLessEqual((self.out / rel).stat().st_size, bs.SEARCH_SIZE_LIMIT)
+
+    def test_fr_015_a_language_file_over_the_limit_is_an_error_naming_the_file(self):
+        root = i18n_repo()
+        limit = (self.out / "fr" / "search-index.json").stat().st_size - 1
+        with mock.patch.object(bs, "SEARCH_SIZE_LIMIT", limit):
+            errors, _ = build_all(root)
+        self.assertTrue(any("search-index.json" in e and str(limit) in e for e in errors), errors)
+
+
+class T022ChineseSearchFiles(unittest.TestCase):
+    """US1-AS8, FR-015: the Chinese index keeps the characters as they are, so the script finds them as substrings of the text."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.errors, cls.out = build_all(i18n_repo(languages=ZH, files={"site/i18n/zh/guide.md": ZH_GUIDE}))
+
+    def test_us1_as8_the_chinese_index_holds_the_text_in_chinese_characters_not_escapes(self):
+        self.assertEqual(self.errors, [])
+        raw = (self.out / "zh" / "search-index.json").read_text(encoding="utf-8")
+        self.assertIn("运行测试，检查输出", raw)
+        self.assertNotIn("\\u", raw)
+        entry = json.loads(raw)[0]
+        self.assertEqual((entry["slug"], entry["title"]), ("guide", "指南"))
+        self.assertIn("运行测试", entry["text"])
+        self.assertEqual([h["text"] for h in entry["headings"]], ["第二步"])
+
+    def test_fr_016_the_chinese_llms_files_use_the_zh_addresses_and_name_the_english_source(self):
+        text = (self.out / "zh" / "llms.txt").read_text(encoding="utf-8")
+        self.assertIn(f"- [指南]({LANGUAGE_BASE}/zh/guide.html): Description de 指南.", text)
+        for name in ("zh/llms.txt", "zh/llms-full.txt"):
+            self.assertRegex((self.out / name).read_text(encoding="utf-8"), ENGLISH_SOURCE_LINE)
 
 
 class T5ButtonRevealedByScript(unittest.TestCase):

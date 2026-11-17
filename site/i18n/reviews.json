@@ -1,0 +1,282 @@
+[
+  {
+    "language": "de",
+    "slug": "docker",
+    "fingerprint": "ba838efdb064cdb08914baa943a79efe02f608659459b8827883285d36c7e84f",
+    "translation_fingerprint": "e8108a5987e775b096e251261398d3a75013987095a048306e0f5bcc8ace100e",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "de",
+    "slug": "first-test",
+    "fingerprint": "fda7e71e5e326bc03d72f8c9ef6f8b95feabec80763f205ae7362a10a3a571d1",
+    "translation_fingerprint": "7616ee821d98a3dd95dda6a6c6766f68f9e60612dc9cfd35f71096c8d8bc269b",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "de",
+    "slug": "index",
+    "fingerprint": "a1161ab614406fcfae8490e0b5398e3b56fe13c92169dd92a7ef4e311541d34c",
+    "translation_fingerprint": "9ae5a67d6af39ca36a743f8b433064c88d5486cf205e9f428b763fe1c6905eba",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "de",
+    "slug": "installing",
+    "fingerprint": "93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310",
+    "translation_fingerprint": "f6e5b5957e63874bd9e8c962795a2b54be51d3286ef4e6e7a3fb7e2882181147",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "de",
+    "slug": "overview",
+    "fingerprint": "faf2593150cb4767a598a4183a06a215b68307ec7c26da0cc429744c250d4622",
+    "translation_fingerprint": "24b0992e05b151b2f77fe80c0ab54f18493183a73b8f60f467ceecb61b1bae19",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "de",
+    "slug": "quickstart",
+    "fingerprint": "86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402",
+    "translation_fingerprint": "2cd911b5e295cead0349dab2019cc55fb0751f39830dd45e966c40a3e1cf234f",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "de",
+    "slug": "updating",
+    "fingerprint": "a0c3a4ff4fa192302942a56576ce1f0f240ffb1450dbbc780aeb963709181873",
+    "translation_fingerprint": "8f7ec471997889bbabdef3f16c0d2e7e13658889993a1b36f1f002e52d923c49",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "es",
+    "slug": "docker",
+    "fingerprint": "ba838efdb064cdb08914baa943a79efe02f608659459b8827883285d36c7e84f",
+    "translation_fingerprint": "5a38e7a08a3ec9710296f107b1471c966c5f835bd0f488a4b075fde7a768b907",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "es",
+    "slug": "first-test",
+    "fingerprint": "fda7e71e5e326bc03d72f8c9ef6f8b95feabec80763f205ae7362a10a3a571d1",
+    "translation_fingerprint": "d9699292a9d7760b0f5d56327c7a987e8d0cda16f437f185b8302fa14a72f774",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "es",
+    "slug": "index",
+    "fingerprint": "a1161ab614406fcfae8490e0b5398e3b56fe13c92169dd92a7ef4e311541d34c",
+    "translation_fingerprint": "9d4cfca1836d4e81c3d3cd6ad2e4864f31ea9f3b7091eedeabca48c64bea5011",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "es",
+    "slug": "installing",
+    "fingerprint": "93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310",
+    "translation_fingerprint": "d9c14a12a1ff5691173cc23a59e256ce509c4087a462e0a6b9fe2b0bf7ad0b32",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "es",
+    "slug": "overview",
+    "fingerprint": "faf2593150cb4767a598a4183a06a215b68307ec7c26da0cc429744c250d4622",
+    "translation_fingerprint": "b700bd97797159d1f661b9e450dc30384d0d96c87d71819e5aac9274ba847156",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "es",
+    "slug": "quickstart",
+    "fingerprint": "86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402",
+    "translation_fingerprint": "cf754807b47e26f26ccfac8d35823360a066f94e9a1d0d25957739c1b237e59e",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "es",
+    "slug": "updating",
+    "fingerprint": "a0c3a4ff4fa192302942a56576ce1f0f240ffb1450dbbc780aeb963709181873",
+    "translation_fingerprint": "51f5dbb839dc42c6dd7047f4a59b166b8cbbca1e4421bb00c9a0fbfe448ba417",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "fr",
+    "slug": "docker",
+    "fingerprint": "ba838efdb064cdb08914baa943a79efe02f608659459b8827883285d36c7e84f",
+    "translation_fingerprint": "7aad4be8b9dcfb417671dac6033d55e8bc48e3aad7a44c35a59027fe3302fab7",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "fr",
+    "slug": "first-test",
+    "fingerprint": "fda7e71e5e326bc03d72f8c9ef6f8b95feabec80763f205ae7362a10a3a571d1",
+    "translation_fingerprint": "186d8c5034c6ef7f28ddc9429f80b9a100bc688f3f4034efe3b75cc440ecbbd2",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "fr",
+    "slug": "index",
+    "fingerprint": "a1161ab614406fcfae8490e0b5398e3b56fe13c92169dd92a7ef4e311541d34c",
+    "translation_fingerprint": "297fdfc89e811cee2707cc84592fcb57f01be8923137507e301676bab76ce2c8",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "fr",
+    "slug": "installing",
+    "fingerprint": "93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310",
+    "translation_fingerprint": "1f7723fb293a9240cf0041e1e2e609b35afc587be2a6b0c92b6aa1db9954282d",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "fr",
+    "slug": "overview",
+    "fingerprint": "faf2593150cb4767a598a4183a06a215b68307ec7c26da0cc429744c250d4622",
+    "translation_fingerprint": "603c1475e9cc0651e6f445b19547df81d948ff0433e939394fdaa70c99e5d120",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "fr",
+    "slug": "quickstart",
+    "fingerprint": "86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402",
+    "translation_fingerprint": "65d6cf44dd6de4075cfc1e0bd1ff7fdebb2cebfae30509caf8476be9a16431a1",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "fr",
+    "slug": "updating",
+    "fingerprint": "a0c3a4ff4fa192302942a56576ce1f0f240ffb1450dbbc780aeb963709181873",
+    "translation_fingerprint": "22d94aa83897ca12a9ae3c2c617cfd94519e82b2a964a47307b0f2e5d5cb4365",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "it",
+    "slug": "docker",
+    "fingerprint": "ba838efdb064cdb08914baa943a79efe02f608659459b8827883285d36c7e84f",
+    "translation_fingerprint": "02ba570a17c57db0e609d708112faf70eba0b3974e869f7263942eb0c2a20e28",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "it",
+    "slug": "first-test",
+    "fingerprint": "fda7e71e5e326bc03d72f8c9ef6f8b95feabec80763f205ae7362a10a3a571d1",
+    "translation_fingerprint": "5b266b638144920c92d0faa368dab9c6243baa614b655bd21c14b794e89da585",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "it",
+    "slug": "index",
+    "fingerprint": "a1161ab614406fcfae8490e0b5398e3b56fe13c92169dd92a7ef4e311541d34c",
+    "translation_fingerprint": "7d2a1bfc9cc519361d2e7241c0400267bbdee2b676e86828f443dfe1d614e8f0",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "it",
+    "slug": "installing",
+    "fingerprint": "93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310",
+    "translation_fingerprint": "32ef23955b9f9ab790f1a2fef9b1cad16c76b4e8047dc517f8f3c6f7d4cba744",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "it",
+    "slug": "overview",
+    "fingerprint": "faf2593150cb4767a598a4183a06a215b68307ec7c26da0cc429744c250d4622",
+    "translation_fingerprint": "7bd248908e26bb5f98a18fe35cbe14d206c0b53b5237923dd80c0e831a24350c",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "it",
+    "slug": "quickstart",
+    "fingerprint": "86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402",
+    "translation_fingerprint": "b6accd46d3a2451537ed7ec32aba003f91deac8caad301b400b2f6dc0870081d",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "it",
+    "slug": "updating",
+    "fingerprint": "a0c3a4ff4fa192302942a56576ce1f0f240ffb1450dbbc780aeb963709181873",
+    "translation_fingerprint": "8eeb2116bc5770c0b9d19f7cf4596dc304174a68165b922de4874a2552113013",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "zh",
+    "slug": "docker",
+    "fingerprint": "ba838efdb064cdb08914baa943a79efe02f608659459b8827883285d36c7e84f",
+    "translation_fingerprint": "b7aab8bf52abcbcb7308ea59872f388f4c3bdeb20b61235b5f7a61dc27aa8f6d",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "zh",
+    "slug": "first-test",
+    "fingerprint": "fda7e71e5e326bc03d72f8c9ef6f8b95feabec80763f205ae7362a10a3a571d1",
+    "translation_fingerprint": "acdd4323cdb34da39e218d6ede8961bb6066866aefddd9e45103de384566419e",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "zh",
+    "slug": "index",
+    "fingerprint": "a1161ab614406fcfae8490e0b5398e3b56fe13c92169dd92a7ef4e311541d34c",
+    "translation_fingerprint": "8ee91da1530331b04a79859290f62e197003d245d86d90b38c63971a67f2252e",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "zh",
+    "slug": "installing",
+    "fingerprint": "93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310",
+    "translation_fingerprint": "0bcd16b264d0928b42c1e6ba4fb58e92f80a3e16650a43abe080ec6dc2f02254",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "zh",
+    "slug": "overview",
+    "fingerprint": "faf2593150cb4767a598a4183a06a215b68307ec7c26da0cc429744c250d4622",
+    "translation_fingerprint": "35b9a57768a5208448be519c8895acf740dff4d31e5cb7bef56d98cd791185ae",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "zh",
+    "slug": "quickstart",
+    "fingerprint": "86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402",
+    "translation_fingerprint": "9a1695d77bddfae1c306cdb487c0e23b1cbc9a53bba76c243c39c61ff36ff790",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  },
+  {
+    "language": "zh",
+    "slug": "updating",
+    "fingerprint": "a0c3a4ff4fa192302942a56576ce1f0f240ffb1450dbbc780aeb963709181873",
+    "translation_fingerprint": "ef640cf01397445cb58ecbb6f3cf873b2d4cd4cd018902e190c347b2adea65fe",
+    "reviewer": "Christian Stephan",
+    "date": "2026-11-16"
+  }
+]

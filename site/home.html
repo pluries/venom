@@ -1,19 +1,21 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{lang}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{site_title}}: integration tests written in YAML</title>
 <meta name="description" content="{{description}}">
+{{alternates}}
 {{head_links}}
 {{scripts}}
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="{{assets}}style.css">
 </head>
-<body class="home">
-<a class="skip" href="#main">Skip to content</a>
+<body class="home" data-ui="{{data_ui}}">
+<a class="skip" href="#main">{{ui_skip}}</a>
 {{topbar}}
+{{banners}}
 
-<main id="main">
+<main id="main"{{main_lang}}>
 <section class="hero"><div class="wrap-wide hero-inner">
 <p class="eyebrow">// integration tests, declared in yaml</p>
 <h1>YAML in. <br><span class="accent">PASS</span> out.</h1>
@@ -51,8 +53,8 @@ final status: <span class="ok">PASS</span></code></pre></div>
 </div></section>
 
 <section class="band wrap-wide why">
-<h2>Why this fork</h2>
-<p class="lede">Venom is a good tool that needed an owner. This fork keeps it maintained, upgrades what it stands on, adds executors, and ships releases you can verify.</p>
+<h2>About this fork</h2>
+<p class="lede">Venom is a solid tool, and this fork keeps it moving: maintained, kept up to date, with new executors and releases you can verify.</p>
 <div class="cards">
 <div class="card"><span class="tag">Maintained</span><h3>Someone is on it</h3><p>213 commits since the previous release. Every change passes lint, tests and a SonarQube gate on new code before it is merged.</p></div>
 <div class="card"><span class="tag">Upgraded</span><h3>Current foundations</h3><p>Built with Go 1.27. Known vulnerabilities in the standard library and in dependencies are fixed as they are found, and a vulnerability scan runs on every build.</p></div>
@@ -83,6 +85,6 @@ final status: <span class="ok">PASS</span></code></pre></div>
 </section>
 </main>
 
-<footer class="foot"><div class="wrap-wide"><span>Pluries Venom is an independent fork of ovh/venom, published under the Apache-2.0 licence. <a href="https://github.com/ovh/venom">Upstream: ovh/venom</a> · <a href="https://github.com/pluries/venom/blob/main/LICENSE">Licence</a></span><a href="https://github.com/pluries/venom">github.com/pluries/venom</a></div></footer>
+<footer class="foot"><div class="wrap-wide"><span>{{ui_footer_notice}} <a href="https://github.com/ovh/venom">{{ui_footer_upstream}}</a> · <a href="https://github.com/pluries/venom/blob/main/LICENSE">{{ui_footer_licence}}</a></span><a href="https://github.com/pluries/venom">github.com/pluries/venom</a></div></footer>
 </body>
 </html>

@@ -154,7 +154,7 @@ hr { border: 0; border-top: 2px solid var(--line); margin: 2em 0; }
 .fact strong, .fact b { display: block; font-family: "Archivo", "Arial Black", system-ui, sans-serif; font-weight: 800; font-size: 22px; line-height: 1.15; text-transform: uppercase; color: var(--bone); }
 
 .band { padding-top: 88px; padding-bottom: 8px; }
-.band h2 { margin: 0 0 12px; max-width: 760px; font-family: "Archivo", "Arial Black", system-ui, sans-serif; font-weight: 800; font-size: clamp(1.9rem, 4vw, 2.875rem); line-height: 1.05; text-transform: uppercase; }
+.band h2 { margin: 0 0 12px; max-width: 760px; font-family: "Archivo", "Arial Black", system-ui, sans-serif; font-weight: 800; overflow-wrap: anywhere; font-size: clamp(1.9rem, 4vw, 2.875rem); line-height: 1.05; text-transform: uppercase; }
 .muted { color: var(--mute); max-width: 760px; margin: 0 0 40px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 20px; margin-top: 32px; }
 .card { padding: 26px; border: 2px solid var(--line); background: var(--ink-2); }
@@ -258,3 +258,26 @@ a.card:hover { border-color: var(--venom); }
 .path h3 a { color: var(--bone); text-decoration: none; }
 .path h3 a:hover { color: var(--venom); }
 .path p { margin: 0; color: var(--mute); }
+
+/* Languages: the control under the top bar, the notices of a machine draft and of a page not translated, long words and Chinese */
+.lang-menu, .lang-dropdown { position: relative; font-size: 0.875rem; }
+.lang-dropdown summary { display: inline-flex; align-items: center; gap: 8px; height: 40px; box-sizing: border-box; padding: 0 12px; border: 2px solid var(--line); background: none; color: var(--bone); cursor: pointer; list-style: none; }
+.lang-dropdown summary::-webkit-details-marker { display: none; }
+.lang-dropdown summary::after { content: ""; width: 6px; height: 6px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+.lang-dropdown[open] summary::after { transform: translateY(2px) rotate(225deg); }
+.lang-dropdown summary:hover, .lang-dropdown[open] summary { background: var(--ink-2); border-color: var(--venom); }
+.lang-dropdown[open] .lang-panel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; min-width: 100%; max-width: calc(100vw - 32px); box-sizing: border-box; padding: 6px 0; overflow-wrap: anywhere; background: var(--ink-2); border: 2px solid var(--line); }
+.lang-menu a { display: block; padding: 8px 14px; border-left: 4px solid transparent; color: var(--mute); text-decoration: none; }
+.lang-menu a:hover { color: var(--bone); border-left-color: var(--venom); }
+.lang-menu a[aria-current] { color: var(--bone); border-left-color: var(--venom); font-weight: 600; }
+.fallback-notice, .override-notice { max-width: 1320px; margin: 16px auto 0; padding: 12px 20px; border: 2px solid var(--line); border-left: 6px solid var(--venom); background: var(--ink-2); color: var(--bone); font-size: 0.9375rem; overflow-wrap: anywhere; }
+.fallback-notice p, .override-notice p { margin: 0; }
+.card, .fact { overflow-wrap: anywhere; }
+@media (max-width: 860px) {
+  .top-actions { position: relative; }
+  .lang-menu, .lang-dropdown { position: static; }
+  .fallback-notice, .override-notice { margin: 16px 16px 0; }
+}
+html:lang(zh-Hans) body { font-family: "Public Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", system-ui, sans-serif; }
+:lang(zh-Hans) h1, :lang(zh-Hans) h2, :lang(zh-Hans) h3, :lang(zh-Hans) h4 { font-family: "Archivo", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; }
+:lang(zh-Hans) pre, :lang(zh-Hans) code { font-family: "IBM Plex Mono", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", monospace; }

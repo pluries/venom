@@ -149,6 +149,63 @@ class Converter(unittest.TestCase):
         self.assertIn("snake_case_name", rendered.html)
 
 
+class ExplicitHeadingId(unittest.TestCase):
+    """Spec 013, task T006 (US2-AS11, FR-010, D-011): a heading may end with `{#english-anchor}`, which is then its id."""
+
+    def test_us2_as11_the_explicit_id_is_the_anchor_and_not_part_of_the_heading(self):
+        rendered = bs.render_markdown("## Installer {#install}\n")
+        self.assertEqual(rendered.html, '<h2 id="install">Installer</h2>')
+        self.assertEqual(rendered.anchors, {"install"})
+        self.assertEqual(rendered.headings, [(2, "Installer", "install")])
+
+    def test_us2_as11_the_id_is_absent_from_the_text_the_headings_list_and_the_title(self):
+        rendered = bs.render_markdown("# Titre {#top}\n\n## Sous `code` {#sub-code}\n")
+        self.assertEqual(rendered.title, "Titre")
+        self.assertEqual(rendered.headings, [(1, "Titre", "top"), (2, "Sous code", "sub-code")])
+        self.assertIn('<h2 id="sub-code">Sous <code>code</code></h2>', rendered.html)
+        self.assertNotIn("{#", rendered.html)
+
+    def test_us2_as11_the_table_of_contents_reads_the_explicit_id(self):
+        toc = bs.render_toc(bs.render_markdown("# Titre {#top}\n\n## Sous `code` {#sub-code}\n"))
+        self.assertIn('<li><a href="#sub-code">Sous code</a></li>', toc)
+        self.assertNotIn("{#", toc)
+
+    def test_us2_as11_the_search_headings_read_the_explicit_id(self):
+        errors, out = run_build({"index.md": "# Home\n\n## Sous `code` {#sub-code}\n\ntext\n"}, [INDEX])
+        self.assertEqual(errors, [])
+        headings = json.loads((out / "search-index.json").read_text(encoding="utf-8"))[0]["headings"]
+        self.assertEqual(headings, [{"text": "Sous code", "anchor": "sub-code"}])
+
+    def test_us2_as11_an_explicit_id_is_registered_so_no_automatic_slug_takes_it(self):
+        rendered = bs.render_markdown("## X {#a}\n\n## A\n\n## A\n")
+        self.assertEqual([anchor for _, _, anchor in rendered.headings], ["a", "a-1", "a-2"])
+        self.assertEqual(rendered.anchors, {"a", "a-1", "a-2"})
+
+    def test_fr_010_a_heading_without_an_explicit_id_is_unchanged(self):
+        """Characterization, green before and after: the English files carry no explicit id, so their output must not change."""
+        rendered = bs.render_markdown("## Plain heading\n\n### With `code` and **bold**\n")
+        self.assertEqual(rendered.headings, [(2, "Plain heading", "plain-heading"), (3, "With code and bold", "with-code-and-bold")])
+        self.assertIn('<h2 id="plain-heading">Plain heading</h2>', rendered.html)
+
+    def test_us2_as11_explicit_and_automatic_ids_mix_on_one_page(self):
+        rendered = bs.render_markdown("## Plain heading\n\n## One {#x}\n\n## Two\n")
+        self.assertEqual(rendered.headings, [(2, "Plain heading", "plain-heading"), (2, "One", "x"), (2, "Two", "two")])
+
+    def test_fr_010_only_a_trailing_id_counts(self):
+        rendered = bs.render_markdown("## About {#x} things\n")
+        self.assertEqual(rendered.headings, [(2, "About {#x} things", "about-x-things")])
+
+    def test_fr_010_an_id_with_a_quote_never_reaches_the_attribute_raw(self):
+        rendered = bs.render_markdown('## X {#a"b}\n')
+        self.assertNotIn('id="a"b', rendered.html)
+
+    def test_us2_as11_a_link_to_the_explicit_id_resolves_and_the_slug_of_the_text_is_dead(self):
+        source = "# Home\n\n## Installer {#install}\n\n[ok](#install) and [dead](#installer)\n"
+        errors, _ = run_build({"index.md": source}, [INDEX])
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("dead anchor '#installer'", errors[0])
+
+
 class LinkResolution(unittest.TestCase):
     def test_a_link_to_an_existing_public_file_goes_to_github(self):
         emitted, errors = resolve("src/a.cs", {"src/a.cs": "x"})

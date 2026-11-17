@@ -14,6 +14,7 @@ from pathlib import Path
 
 import build_site
 import site_checks
+import site_i18n
 
 HTML_DIR = "usr/share/nginx/html"
 NGINX_CONF = "etc/nginx/nginx.conf"
@@ -109,14 +110,30 @@ def check_license(export_root: Path) -> list[str]:
     return []
 
 
+def check_languages(export_root: Path, config: dict) -> list[str]:
+    """FR-022, US5-AS2: the language folders of the image against `languages` of `site/site.json` (`config`), without a reference
+    build to compare with. A language with `enabled` true needs `<HTML_DIR>/<path>/index.html`; a language that is not enabled must
+    have no folder `<HTML_DIR>/<path>`. Finding: `language: <code>: ...`, naming the folder."""
+    html_dir = export_root / HTML_DIR
+    languages = {code: entry for code, entry in (config.get("languages") or {}).items() if code != "en"}
+    wanted = {code: site_i18n.language_path(config, code) for code, entry in languages.items() if entry.get("enabled") is True}
+    found = [f"language: {code}: {HTML_DIR}/{path}/index.html is missing" for code, path in wanted.items()
+             if not (html_dir / path / "index.html").is_file()]
+    unwanted = sorted(site_i18n.language_prefixes(config) - set(wanted.values()))
+    return found + [f"language: {path}: {HTML_DIR}/{path} must not exist, the language is not enabled"
+                    for path in unwanted if (html_dir / path).exists()]
+
+
 def run_checks(args: argparse.Namespace, root: Path) -> list[str]:
-    host = urllib.parse.urlsplit(build_site.load_config(root).get("baseUrl", "")).hostname or ""
+    config = build_site.load_config(root)
+    host = urllib.parse.urlsplit(config.get("baseUrl", "")).hostname or ""
     names = build_site.private_names(root)
     export = args.export
     findings = leak_scan(export, host, build_site.PRIVATE_PATHS, names)
     findings += check_user(args.inspect.read_text(encoding="utf-8"))
     findings += scan_history(args.history.read_text(encoding="utf-8"), names)
     findings += check_license(export)
+    findings += check_languages(export, config)
     if args.compare_with:
         findings += compare_trees(export / HTML_DIR, args.compare_with)
     return findings

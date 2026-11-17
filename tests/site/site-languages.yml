@@ -1,0 +1,163 @@
+name: Site languages in a browser
+# Spec 013-site-languages, T045 (US1-AS8, US1-AS14 with D-026). Not run by `make integration-test` (its glob is tests/*.yml): it needs the built site.
+#   make site-preview                                   (or: python scripts/build_site.py --preview ...)
+#   python -m http.server 8000 --directory build/site   (any server of the build folder)
+#   venom run tests/site/site-languages.yml --var siteUrl=http://localhost:8000
+# The web executor cannot read a scroll width, so "no sideways scroll at 320 px" is checked by eye (T046) and by the CSS guards
+# of scripts/test_site_look.py. This suite proves what the executor can: every language's pages load at 320 px with their
+# language control and search button, and the Chinese search keeps matching one character, a run of characters and two
+# terms separated by a full-width space (U+3000).
+vars:
+  siteUrl: http://localhost:8000
+  web:
+    driver: chrome
+    width: 320
+    height: 800
+    headless: true
+testcases:
+- name: English home loads at 320 px
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.siteUrl}}/"
+    assertions:
+    - result.title ShouldNotBeEmpty
+  - type: web
+    action:
+      find: .lang-menu
+    assertions:
+    - result.find ShouldBeGreaterThan 0
+
+- name: French home loads at 320 px
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.siteUrl}}/fr/"
+    assertions:
+    - result.title ShouldNotBeEmpty
+  - type: web
+    action:
+      find: .lang-menu
+    assertions:
+    - result.find ShouldBeGreaterThan 0
+
+- name: German home loads at 320 px
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.siteUrl}}/de/"
+    assertions:
+    - result.title ShouldNotBeEmpty
+  - type: web
+    action:
+      find: .lang-menu
+    assertions:
+    - result.find ShouldBeGreaterThan 0
+
+- name: Italian home loads at 320 px
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.siteUrl}}/it/"
+    assertions:
+    - result.title ShouldNotBeEmpty
+  - type: web
+    action:
+      find: .lang-menu
+    assertions:
+    - result.find ShouldBeGreaterThan 0
+
+- name: Spanish home loads at 320 px
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.siteUrl}}/es/"
+    assertions:
+    - result.title ShouldNotBeEmpty
+  - type: web
+    action:
+      find: .lang-menu
+    assertions:
+    - result.find ShouldBeGreaterThan 0
+
+- name: Chinese home loads at 320 px
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.siteUrl}}/zh/"
+    assertions:
+    - result.title ShouldNotBeEmpty
+  - type: web
+    action:
+      find: .lang-menu
+    assertions:
+    - result.find ShouldBeGreaterThan 0
+
+- name: Chinese search finds a one-character term (US1-AS8)
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.siteUrl}}/zh/"
+  - type: web
+    action:
+      click:
+        find: .search-button
+  - type: web
+    action:
+      fill:
+      - find: .search-input
+        text: "步"
+  - type: web
+    action:
+      find: .search-hit
+    assertions:
+    - result.find ShouldBeGreaterThan 0
+
+- name: Chinese search finds a longer term inside a run of characters (US1-AS8)
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.siteUrl}}/zh/"
+  - type: web
+    action:
+      click:
+        find: .search-button
+  - type: web
+    action:
+      fill:
+      - find: .search-input
+        text: "步骤"
+  - type: web
+    action:
+      find: .search-hit
+    assertions:
+    - result.find ShouldBeGreaterThan 0
+
+- name: Chinese search finds two terms joined by a full-width space (US1-AS8)
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.siteUrl}}/zh/"
+  - type: web
+    action:
+      click:
+        find: .search-button
+  - type: web
+    action:
+      fill:
+      - find: .search-input
+        text: "步骤　断言"
+  - type: web
+    action:
+      find: .search-hit
+    assertions:
+    - result.find ShouldBeGreaterThan 0

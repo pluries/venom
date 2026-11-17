@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Tests of the site image checks (story #3622, task #3662).
-Findings start with a kind prefix: leak: diff: user: history: license:
+Findings start with a kind prefix: leak: diff: user: history: license: language:
+T6 and T7 (spec 013, task T121, US5-AS2, FR-022) cover the language folders of the image.
 Offline, standard library only. Run: python scripts/test_site_image_check.py
 """
+import argparse
+import contextlib
+import io
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import site_image_check as sc  # noqa: E402
@@ -203,6 +208,108 @@ class T5LicenseTests(TempCase):
         write(self.root, sc.LICENSE_FILE, "")
         found = sc.check_license(self.root)
         self.assertTrue(found and found[0].startswith("license:"), found)
+
+
+LANGUAGE_FOLDERS = ("fr", "de", "zh")
+LANGUAGES = {"en": {"name": "English", "path": "", "lang": "en"},
+             "fr": {"name": "French", "path": "fr", "lang": "fr", "enabled": True},
+             "de": {"name": "German", "path": "de", "lang": "de", "enabled": False},
+             "zh": {"name": "Chinese", "path": "zh", "lang": "zh-Hans", "enabled": True},
+             "it": {"name": "Italian", "path": "it", "lang": "it"}}
+
+
+def make_language_export(root: Path, folders=LANGUAGE_FOLDERS) -> None:
+    """An exported image whose pages sit at the root (English) and in one folder per language."""
+    make_export(root)
+    for folder in folders:
+        write(root, f"{sc.HTML_DIR}/{folder}/index.html", CLEAN_PAGE)
+        write(root, f"{sc.HTML_DIR}/{folder}/guide.html", CLEAN_PAGE)
+        write(root, f"{sc.HTML_DIR}/{folder}/llms.txt", "# Venom\n")
+
+
+class T6LanguageFolderTests(TempCase):
+    """Characterization (the checks already walk every folder): the leak scan and the tree comparison cover the language folders."""
+
+    def setUp(self):
+        super().setUp()
+        make_language_export(self.root)
+
+    def test_T6_clean_language_folders_have_no_leak_finding(self):
+        self.assertEqual(sc.leak_scan(self.root, HOST, PRIVATE_PATHS, (NAME,)), [])
+
+    def test_T6_a_leak_in_a_language_page_is_found_and_names_the_page(self):
+        cases = (("fr/guide.html", "<p>see docs/compliance/pipelines.md</p>"), ("zh/index.html", "<p>host 10.1.2.3</p>"),
+                 ("de/llms.txt", f"# {NAME}\n"))
+        for rel, text in cases:
+            write(self.root, f"{sc.HTML_DIR}/{rel}", text)
+            with self.subTest(page=rel):
+                found = sc.leak_scan(self.root, HOST, PRIVATE_PATHS, (NAME,))
+                self.assertTrue(found and all(f.startswith("leak:") for f in found), found)
+                self.assertTrue(any(rel in f for f in found), found)
+            write(self.root, f"{sc.HTML_DIR}/{rel}", CLEAN_PAGE)
+
+    def test_T6_the_page_set_of_the_image_must_equal_the_build_output_language_folders_included(self):
+        built = self.root / "built"
+        for rel in ("index.html", *(f"{folder}/{name}" for folder in LANGUAGE_FOLDERS for name in ("index.html", "guide.html", "llms.txt"))):
+            write(built, rel, CLEAN_PAGE if rel.endswith(".html") else "# Venom\n")
+        html = self.root / sc.HTML_DIR
+        self.assertEqual(sc.compare_trees(built, html), [])
+        (html / "fr" / "guide.html").unlink()
+        write(html, "es/index.html", CLEAN_PAGE)
+        write(html, "de/index.html", CLEAN_PAGE + "<!-- changed -->")
+        self.assertEqual(sc.compare_trees(built, html), ["diff: missing fr/guide.html", "diff: extra es/index.html", "diff: changed de/index.html"])
+
+
+class T7LanguageGapTests(TempCase):
+    """US5-AS2, FR-022: without a reference build to compare with, the image must still hold the folder of every enabled language and
+    none of a language that is not enabled (a folder left by a preview, or by an earlier build, is a finding)."""
+
+    def check(self, folders=("fr", "zh"), languages=None) -> list[str]:
+        make_language_export(self.root, folders)
+        return sc.check_languages(self.root, {"languages": LANGUAGES if languages is None else languages})
+
+    def test_T7_the_folders_of_the_enabled_languages_and_nothing_else_have_no_finding(self):
+        self.assertEqual(self.check(), [])
+
+    def test_T7_an_enabled_language_without_its_folder_is_a_finding_that_names_it(self):
+        found = self.check(folders=("fr",))
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0].startswith("language:") and "zh" in found[0], found)
+
+    def test_T7_an_enabled_language_whose_folder_has_no_home_page_is_a_finding(self):
+        make_language_export(self.root, ("fr", "zh"))
+        (self.root / sc.HTML_DIR / "zh" / "index.html").unlink()
+        found = sc.check_languages(self.root, {"languages": LANGUAGES})
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0].startswith("language:") and "zh" in found[0] and "index.html" in found[0], found)
+
+    def assert_unwanted(self, folder: str):
+        found = self.check(folders=("fr", "zh", folder))
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0].startswith("language:") and folder in found[0], found)
+
+    def test_T7_a_language_that_is_disabled_must_have_no_folder(self):
+        self.assert_unwanted("de")
+
+    def test_T7_a_language_with_no_enabled_key_is_not_enabled_and_must_have_no_folder(self):
+        self.assert_unwanted("it")
+
+    def test_T7_english_and_a_site_without_languages_have_no_finding(self):
+        make_export(self.root)
+        self.assertEqual(sc.check_languages(self.root, {"languages": {"en": LANGUAGES["en"]}}), [])
+        self.assertEqual(sc.check_languages(self.root, {}), [])
+
+    def test_T7_the_run_reports_the_language_findings_without_a_reference_build(self):
+        make_language_export(self.root, ("fr", "zh", "de"))
+        files = {}
+        for name, text in (("inspect.json", inspect("101:101")), ("history.txt", "COPY /out/ /usr/share/nginx/html/\n")):
+            files[name] = write(self.root, "work/" + name, text)
+        args = argparse.Namespace(export=self.root, inspect=files["inspect.json"], history=files["history.txt"], compare_with=None)
+        config = {"baseUrl": f"https://{HOST}", "languages": LANGUAGES}
+        with mock.patch.object(sc.build_site, "load_config", return_value=config), mock.patch.object(sc.build_site, "private_names", return_value=()):
+            found = sc.run_checks(args, self.root)
+        self.assertTrue(any(f.startswith("language:") and "de" in f for f in found), found)
+        self.assertEqual([f for f in found if not f.startswith("language:")], [])
 
 
 if __name__ == "__main__":

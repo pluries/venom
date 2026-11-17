@@ -5,15 +5,46 @@
   const THEMES = ["auto", "light", "dark"];
   const MAX_HITS = 8;
 
+  const DEFAULT_UI = {
+    copy: "Copy",
+    copied: "Copied",
+    copy_failed: "Copy failed",
+    copy_aria: "Copy this code",
+    search_aria: "Search the documentation",
+    search_label: "Search",
+    search_placeholder: "Search the documentation",
+    search_empty: "Type to search the documentation.",
+    search_none: "Nothing matches that search.",
+    search_loading: "Loading the search index...",
+    search_unavailable: "Search is not available right now. Use the sidebar to browse the pages.",
+    result_one: "result",
+    result_other: "results",
+    theme_aria: "Theme: {name}. Change theme",
+    theme_title: "Theme: {name}",
+    theme_names: { auto: "Auto", light: "Light", dark: "Dark" },
+  };
+
+  // The page's strings come from the `data-ui` attribute of <body>; a missing or broken one leaves the English defaults.
+  const readUi = () => {
+    try {
+      const given = JSON.parse(document.body.dataset.ui || "{}");
+      return { ...DEFAULT_UI, ...given, theme_names: { ...DEFAULT_UI.theme_names, ...given.theme_names } };
+    } catch {
+      return DEFAULT_UI;
+    }
+  };
+
+  const ui = readUi();
+
   const currentTheme = () => {
     const set = root.dataset.theme;
     return set === "light" || set === "dark" ? set : "auto";
   };
 
   const showTheme = (button) => {
-    const name = currentTheme();
-    button.setAttribute("aria-label", `Theme: ${name.charAt(0).toUpperCase()}${name.slice(1)}. Change theme`);
-    button.setAttribute("title", `Theme: ${name}`);
+    const name = ui.theme_names[currentTheme()];
+    button.setAttribute("aria-label", ui.theme_aria.replace("{name}", name));
+    button.setAttribute("title", ui.theme_title.replace("{name}", name));
   };
 
   const storeTheme = (next, button) => {
@@ -70,7 +101,7 @@
     button.textContent = label;
     button.dataset.state = state;
     globalThis.setTimeout(() => {
-      button.textContent = "Copy";
+      button.textContent = ui.copy;
       delete button.dataset.state;
     }, 1800);
   };
@@ -79,17 +110,17 @@
     const button = document.createElement("button");
     button.type = "button";
     button.className = "copy-button";
-    button.textContent = "Copy";
-    button.setAttribute("aria-label", "Copy this code");
+    button.textContent = ui.copy;
+    button.setAttribute("aria-label", ui.copy_aria);
     button.addEventListener("click", () => {
       if (!navigator.clipboard) {
-        flash(button, "Copy failed", "failed");
+        flash(button, ui.copy_failed, "failed");
         return;
       }
       const text = (block.querySelector("code") || block).textContent;
       navigator.clipboard.writeText(text).then(
-        () => flash(button, "Copied", "copied"),
-        () => flash(button, "Copy failed", "failed"));
+        () => flash(button, ui.copied, "copied"),
+        () => flash(button, ui.copy_failed, "failed"));
     });
     block.appendChild(button);
   };
@@ -222,15 +253,15 @@
     return item;
   };
 
-  const emptyMessage = () => (terms(search.input.value).length === 0 ? "Type to search the documentation." : "Nothing matches that search.");
+  const emptyMessage = () => (terms(search.input.value).length === 0 ? ui.search_empty : ui.search_none);
 
   const render = () => {
     if (search.failed) {
-      note("Search is not available right now. Use the sidebar to browse the pages.");
+      note(ui.search_unavailable);
       return;
     }
     if (!search.index) {
-      note("Loading the search index...");
+      note(ui.search_loading);
       return;
     }
     const found = find(search.input.value);
@@ -243,7 +274,7 @@
     search.list.append(...items);
     search.hits = items.map((item) => item.firstChild);
     search.selected = 0;
-    search.status.textContent = `${found.length} ${found.length === 1 ? "result" : "results"}`;
+    search.status.textContent = `${found.length} ${found.length === 1 ? ui.result_one : ui.result_other}`;
     mark();
   };
 
@@ -261,7 +292,7 @@
     search.opener = from || document.activeElement;
     search.overlay.hidden = false;
     search.input.value = "";
-    note("Loading the search index...");
+    note(ui.search_loading);
     search.input.focus();
     loadIndex().then(render);
   };
@@ -272,6 +303,9 @@
   };
 
   const onInputKey = (event) => {
+    if (event.isComposing || event.keyCode === 229) {
+      return;
+    }
     const { key } = event;
     if ((key === "ArrowDown" || key === "ArrowUp") && search.hits.length > 0) {
       moveSelection(key === "ArrowDown" ? 1 : -1);
@@ -301,11 +335,11 @@
     box.className = "search-box";
     box.setAttribute("role", "dialog");
     box.setAttribute("aria-modal", "true");
-    box.setAttribute("aria-label", "Search the documentation");
+    box.setAttribute("aria-label", ui.search_aria);
     input.type = "search";
     input.className = "search-input";
-    input.setAttribute("aria-label", "Search");
-    input.setAttribute("placeholder", "Search the documentation");
+    input.setAttribute("aria-label", ui.search_label);
+    input.setAttribute("placeholder", ui.search_placeholder);
     input.setAttribute("role", "combobox");
     input.setAttribute("aria-expanded", "true");
     input.setAttribute("aria-controls", "search-results");
@@ -348,7 +382,36 @@
     });
   };
 
+  // Without the script the language links are plain links; with it they keep the section the visitor is reading,
+  // and the open dropdown closes on Escape and on a click outside it.
+  const setupLanguageMenu = () => {
+    for (const link of document.querySelectorAll(".lang-menu a")) {
+      link.addEventListener("click", () => {
+        link.hash = globalThis.location.hash;
+      });
+    }
+    const closeDropdowns = (except) => {
+      for (const dropdown of document.querySelectorAll(".lang-dropdown[open]")) {
+        if (dropdown !== except) {
+          dropdown.open = false;
+        }
+      }
+    };
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        const focused = [...document.querySelectorAll(".lang-dropdown")].find((dropdown) => dropdown.contains(document.activeElement));
+        closeDropdowns(null);
+        focused?.querySelector("summary")?.focus();
+      }
+    });
+    document.addEventListener("click", (event) => {
+      const inside = [...document.querySelectorAll(".lang-dropdown")].find((dropdown) => dropdown.contains(event.target));
+      closeDropdowns(inside ?? null);
+    });
+  };
+
   setupTheme();
+  setupLanguageMenu();
   setupMenu();
   setupCopy();
   setupSearch();
