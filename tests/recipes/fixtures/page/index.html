@@ -16,7 +16,7 @@ document.querySelector('[data-test="add-button"]').addEventListener('click', fun
     return;
   }
   var item = document.createElement('li');
-  item.setAttribute('data-test', 'item');
+  item.dataset.test = 'item';
   item.textContent = input.value;
   document.querySelector('[data-test="list"]').appendChild(item);
   input.value = '';

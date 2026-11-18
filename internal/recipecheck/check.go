@@ -120,7 +120,7 @@ func Check(paths []string, opts Options) (Report, error) {
 	folder := &Folder{Specs: map[string]map[string]bool{}}
 	var unparsable []string
 	for _, f := range files {
-		text, rerr := os.ReadFile(f) //nolint:gosec // the files to check are the user's argument, as for venom run
+		text, rerr := os.ReadFile(f)
 		if rerr != nil {
 			return report, fmt.Errorf("%w: %v", ErrUnusable, rerr)
 		}
@@ -171,7 +171,7 @@ func loadSpec(folder *Folder, spec, specsDir string) {
 	if specsDir == "" {
 		specsDir = defaultSpecsDir
 	}
-	text, err := os.ReadFile(filepath.Join(specsDir, spec, "spec.md")) //nolint:gosec // the specs dir is the user's flag
+	text, err := os.ReadFile(filepath.Join(specsDir, spec, "spec.md"))
 	if err != nil {
 		return
 	}

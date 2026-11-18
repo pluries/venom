@@ -132,7 +132,7 @@ func TestRecipeReplaySessionCannotBeCreated(t *testing.T) {
 
 // dropAfterFirstSession is a POST /session handler that opens one session and then drops every connection, like a
 // host that goes away after the first testcase.
-func dropAfterFirstSession(f *fakeServer) handler {
+func dropAfterFirstSession(_ *fakeServer) handler {
 	var opened atomic.Int32
 	ok := reply(http.StatusOK, `{"sessionId":"`+testSessionID+`","capabilities":{"platformName":"Android"}}`)
 	return func(w http.ResponseWriter, r *http.Request, body []byte) {

@@ -56,8 +56,7 @@ func locatorProblem(st *Step, action string) string {
 }
 
 func countWord(n int) string {
-	switch n {
-	case 1:
+	if n == 1 {
 		return "one locator"
 	}
 	return "locators"

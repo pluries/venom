@@ -66,7 +66,7 @@ testcases:
     assertions:
     - result.code ShouldEqual 0
 `
-	suiteUndefinedPassword = `name: undefined
+	suiteUndefinedVariable = `name: undefined
 testcases:
 - name: pw
   steps:
@@ -234,7 +234,7 @@ func TestRunUndefinedVariable(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			require.NoError(t, os.WriteFile(filepath.Join(dir, "suite.yml"), []byte(suiteUndefinedPassword), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "suite.yml"), []byte(suiteUndefinedVariable), 0o600))
 			args := append([]string{"--format=json", "--output-dir", dir}, tt.args...)
 
 			exit, out := runVenom(t, dir, append(args, "suite.yml")...)

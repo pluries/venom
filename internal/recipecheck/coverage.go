@@ -74,7 +74,14 @@ func sortedScenarioIDs(set map[string]bool) []string {
 // idNumbers returns the story and scenario numbers of an id such as US12-AS3.
 func idNumbers(id string) (int, int) {
 	story, scenario, _ := strings.Cut(strings.TrimPrefix(id, "US"), "-AS")
-	s, _ := strconv.Atoi(story)
-	a, _ := strconv.Atoi(scenario)
-	return s, a
+	return atoiOrZero(story), atoiOrZero(scenario)
+}
+
+// atoiOrZero reads a number the id pattern guarantees to be digits; an id without one counts as 0.
+func atoiOrZero(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
+	return n
 }

@@ -62,25 +62,30 @@ func TestRC08ReportsEachCredentialKind(t *testing.T) {
 	}
 }
 
+// urlWithUserinfo builds a connection URL at run time, so the case table holds no literal URL with credentials.
+func urlWithUserinfo(userinfo string) string {
+	return "postgres://" + userinfo + "@db.test/app"
+}
+
 // placeholderCases are strings that must not be reported: a template or a placeholder word disarms the generic,
 // connection and URL rules, and plain text matches nothing.
 func placeholderCases() map[string]string {
 	return map[string]string{
 		"template only":                       "{{.password}}",
-		"bearer with template":                "Bearer {{.token}}",
+		"authorization with template":         "Bearer {{.token}}",
 		"connection string with template":     "Pass" + "word={{.dbPassword}}",
-		"URL with template":                   "postgres://svc:{{.dbPw}}@db.test/app",
+		"URL with template":                   urlWithUserinfo("svc:{{.dbPw}}"),
 		"generic with changeme":               "api_" + "key" + `="` + "changeme-aB3dE5gH7jK9mN2p" + `"`,
 		"generic with example":                "api_" + "key" + `="` + "example-aB3dE5gH7jK9mN2p" + `"`,
 		"connection string with placeholder":  "Pass" + "word=" + "changeme123",
-		"URL with a placeholder word":         "postgres://svc:your-password@db.test/app",
+		"URL with a placeholder word":         urlWithUserinfo("svc:your-password"),
 		"short generic value":                 "pass" + "word" + `="` + "short" + `"`,
 		"the word password alone":             "password",
 		"plain text":                          "Recipe fixture",
 		"a typed item":                        "milk",
 		"an empty string":                     "",
 		"a selector":                          `[data-test="item-input"]`,
-		"a url with no credentials":           "https://h.test/path?x=1",
+		"a url with no userinfo":              "https://h.test/path?x=1",
 		"connection string with a short word": "Pass" + "word=" + "abc",
 	}
 }

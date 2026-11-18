@@ -99,7 +99,7 @@ func mockKeyProblems(mocks []any) []string {
 // webSteps returns the decoded web steps of a suite file.
 func webSteps(t *testing.T, path string) []map[string]any {
 	t.Helper()
-	text, err := os.ReadFile(path) //nolint:gosec // a fixture of the repository
+	text, err := os.ReadFile(path)
 	require.NoError(t, err)
 	var suite struct {
 		Testcases []struct {
@@ -124,7 +124,7 @@ func recipeFiles(t *testing.T, withDefects bool) []string {
 	root := repoRoot(t)
 	var files []string
 	for _, base := range []string{fixturesDir(t), filepath.Join(root, "tests", "recipes", "reference")} {
-		files = append(files, yamlFilesUnder(base)...)
+		files = append(files, yamlFilesUnder(t, base)...)
 	}
 	if site := filepath.Join(root, "tests", "site", "site-languages.yml"); fileExists(site) {
 		files = append(files, site)
@@ -137,9 +137,10 @@ func recipeFiles(t *testing.T, withDefects bool) []string {
 }
 
 // yamlFilesUnder lists the .yml and .yaml files under base; a folder that does not exist yet has none.
-func yamlFilesUnder(base string) []string {
+func yamlFilesUnder(t *testing.T, base string) []string {
+	t.Helper()
 	var files []string
-	_ = filepath.WalkDir(base, func(p string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(base, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil //nolint:nilerr // a folder that does not exist yet has no recipe
 		}
@@ -148,6 +149,7 @@ func yamlFilesUnder(base string) []string {
 		}
 		return nil
 	})
+	require.NoError(t, err)
 	return files
 }
 
@@ -212,7 +214,7 @@ func variablesUsedBy(t *testing.T, files []string) map[string]any {
 	t.Helper()
 	vars := map[string]any{"password": "supplied-by-the-test"}
 	for _, f := range files {
-		text, err := os.ReadFile(f) //nolint:gosec // a fixture of the repository
+		text, err := os.ReadFile(f)
 		require.NoError(t, err)
 		for _, m := range templateVar.FindAllStringSubmatch(string(text), -1) {
 			if m[1] != "result" && m[1] != "venom" {
@@ -359,7 +361,7 @@ type referenceStep struct {
 func loadReferenceWeb(t *testing.T) (referenceSuite, string) {
 	t.Helper()
 	path := referenceWeb(t)
-	text, err := os.ReadFile(path) //nolint:gosec // the reference recipe of the repository
+	text, err := os.ReadFile(path)
 	require.NoError(t, err)
 	var suite referenceSuite
 	require.NoError(t, yamlv3.Unmarshal(text, &suite))
@@ -369,7 +371,7 @@ func loadReferenceWeb(t *testing.T) (referenceSuite, string) {
 // scenarioIDs returns the USn-ASm ids of a spec's spec.md.
 func scenarioIDs(t *testing.T, spec string) map[string]bool {
 	t.Helper()
-	text, err := os.ReadFile(filepath.Join(repoSpecsDir(t), spec, "spec.md")) //nolint:gosec // a spec of the repository
+	text, err := os.ReadFile(filepath.Join(repoSpecsDir(t), spec, "spec.md"))
 	require.NoError(t, err)
 	ids := map[string]bool{}
 	for _, id := range regexp.MustCompile(`\bUS\d+-AS\d+\b`).FindAllString(string(text), -1) {
@@ -476,7 +478,12 @@ func TestNullAndScalarTestcaseEntriesAreReadAsVenomRunReadsThem(t *testing.T) {
 			path := writeSuite(t, t.TempDir(), "a.yml", tt.text)
 
 			parsed, parseErr := acceptedByParse(t, []string{path}, nil)
-			report, _ := recipecheck.Check([]string{path}, recipecheck.Options{SpecsDir: "docs/specs"})
+			report, checkErr := recipecheck.Check([]string{path}, recipecheck.Options{SpecsDir: "docs/specs"})
+			if tt.accepted {
+				require.NoError(t, checkErr)
+			} else {
+				require.Error(t, checkErr)
+			}
 
 			assert.Equal(t, tt.accepted, parsed, "venom run's loading said: %v", parseErr)
 			assert.Equal(t, tt.accepted, acceptedByCheck([]string{path}))

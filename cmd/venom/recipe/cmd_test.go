@@ -56,7 +56,7 @@ func specsDirWith(t *testing.T, ids ...string) string {
 func writeSuite(t *testing.T, dir, name, text string) string {
 	t.Helper()
 	p := filepath.Join(dir, name)
-	require.NoError(t, os.WriteFile(p, []byte(text), 0o600))
+	require.NoError(t, os.WriteFile(p, []byte(text), 0o600)) //nolint:gosec // G703: p joins a t.TempDir() and a literal file name of the test
 	return p
 }
 

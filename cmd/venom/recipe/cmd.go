@@ -3,7 +3,6 @@ package recipe
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -62,9 +61,6 @@ func runCheck(out, errOut io.Writer, paths []string) int {
 		printReport(out, report)
 	}
 	switch {
-	case errors.Is(err, recipecheck.ErrUnusable):
-		fmt.Fprintln(errOut, err)
-		return exitUnusable
 	case err != nil:
 		fmt.Fprintln(errOut, err)
 		return exitUnusable
