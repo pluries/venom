@@ -1,0 +1,59 @@
+name: Recipe fixture page
+# The clean fixture of spec 014: it passes `venom recipe check` and, with a browser, `venom run`.
+#   venom run tests/recipes/fixtures/clean/page.yml --var appUrl=<address of tests/recipes/fixtures/page/index.html>
+# The address of the page is the variable appUrl; the recipe holds no other address.
+vars:
+  spec: 014-web-mobile-recipes
+  appUrl: http://localhost:8000
+  web:
+    driver: chrome
+    headless: true
+testcases:
+- name: US1-AS1 the page shows its title and heading
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}"
+    assertions:
+    - result.title ShouldEqual "Recipe fixture page"
+  - type: web
+    action:
+      find: '[data-test="heading"]'
+    assertions:
+    - result.find ShouldEqual 1
+    - result.text ShouldEqual "Recipe fixture"
+
+- name: US1-AS3 an item typed in the input is added to the list
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}"
+  - type: web
+    action:
+      fill:
+      - find: '[data-test="item-input"]'
+        text: milk
+  - type: web
+    action:
+      click:
+        find: '[data-test="add-button"]'
+  - type: web
+    action:
+      find: '[data-test="item"]'
+    assertions:
+    - result.find ShouldEqual 1
+    - result.text ShouldEqual milk
+
+- name: US2-AS1 the list is empty before anything is added
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}"
+  - type: web
+    action:
+      find: '[data-test="item"]'
+    assertions:
+    - result.find ShouldEqual 0

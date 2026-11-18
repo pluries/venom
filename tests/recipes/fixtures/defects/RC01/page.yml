@@ -1,0 +1,28 @@
+name: Defect RC01
+# Planted defect of spec 014: this folder yields RC01 and no other rule (see ../README.md).
+vars:
+  spec: 014-web-mobile-recipes
+  appUrl: http://localhost:8000
+testcases:
+- name: US1-AS1 the heading is shown
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}"
+  - type: web
+    action:
+      find: '[data-test="heading"]'
+    assertions:
+    - result.find ShouldEqual 1
+- name: the page shows a button
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}"
+  - type: web
+    action:
+      find: '[data-test="heading"]'
+    assertions:
+    - result.find ShouldEqual 1

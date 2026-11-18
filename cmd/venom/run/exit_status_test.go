@@ -66,6 +66,15 @@ testcases:
     assertions:
     - result.code ShouldEqual 0
 `
+	suiteUndefinedPassword = `name: undefined
+testcases:
+- name: pw
+  steps:
+  - type: exec
+    script: echo "[{{.password}}]"
+    assertions:
+    - result.systemout ShouldContainSubstring "[{{.password}}]"
+`
 	suiteUnknownVar = `name: unknown
 testcases:
 - name: ok
@@ -179,6 +188,62 @@ func TestInitArgsPrecedence(t *testing.T) {
 			initArgs(c)
 
 			assert.Equal(t, tt.wantFormat, format)
+		})
+	}
+}
+
+// TestRunFailureReportForm pins the form of the report of a failing assertion that a recipe's replay relies on
+// (US1-AS1, T011): the testcase name, the step number, the assertion text, expected and got, then the suite file's own
+// path and the line of the assertion. Characterisation: green on the current code.
+func TestRunFailureReportForm(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "suite.yml"), []byte(suiteFail), 0o600))
+
+	exit, out := runVenom(t, dir, "--format=json", "--output-dir", dir, "suite.yml")
+
+	assert.Equal(t, 2, exit, out)
+	// The output of echo ends with a carriage return on Windows.
+	assert.Regexp(t, `Testcase "ko", step #1-0: Assertion "result\.systemout ShouldEqual nothing" failed\. expected: nothing  got: hello\r? \(suite\.yml:8\)`, out)
+}
+
+// TestRunPassingSuiteReportsNoFailure pins that a passing suite prints no failure line and exits 0 (US1-AS1, T011).
+func TestRunPassingSuiteReportsNoFailure(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "suite.yml"), []byte(suitePass), 0o600))
+
+	exit, out := runVenom(t, dir, "--format=json", "--output-dir", dir, "suite.yml")
+
+	assert.Equal(t, 0, exit, out)
+	assert.NotContains(t, out, "failed. expected:")
+}
+
+// TestRunUndefinedVariable records what a suite does when it uses {{.password}} and no variable is supplied (T016,
+// the Edge Case on an undefined variable, O-4). Without --strict-variables the template text stays as it is, the
+// run does not fail on the variable, and the step sees the literal "{{.password}}". With --strict-variables the run
+// fails and names the variable. Characterisation: green on the current code.
+func TestRunUndefinedVariable(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantExit int
+		want     string
+	}{
+		{name: "without --strict-variables the literal template text is used", wantExit: 0, want: "final status: "},
+		{name: "with --strict-variables the run fails and names the variable", args: []string{"--strict-variables"}, wantExit: 2, want: `unknown variable(s) "password"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "suite.yml"), []byte(suiteUndefinedPassword), 0o600))
+			args := append([]string{"--format=json", "--output-dir", dir}, tt.args...)
+
+			exit, out := runVenom(t, dir, append(args, "suite.yml")...)
+
+			assert.Equal(t, tt.wantExit, exit, out)
+			assert.Contains(t, out, tt.want)
+			if tt.wantExit == 0 {
+				assert.Contains(t, out, "PASS")
+			}
 		})
 	}
 }

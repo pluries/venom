@@ -3,6 +3,7 @@ package root
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/ovh/venom/cmd/venom/recipe"
 	"github.com/ovh/venom/cmd/venom/run"
 	"github.com/ovh/venom/cmd/venom/version"
 )
@@ -19,6 +20,7 @@ func New() *cobra.Command {
 
 // AddCommands adds child commands to the root command rootCmd.
 func addCommands(cmd *cobra.Command) {
+	cmd.AddCommand(recipe.Cmd)
 	cmd.AddCommand(run.Cmd)
 	cmd.AddCommand(version.Cmd)
 }

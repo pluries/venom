@@ -1,110 +1,207 @@
 name: Site languages in a browser
-# Spec 013-site-languages, T045 (US1-AS8, US1-AS14 with D-026). Not run by `make integration-test` (its glob is tests/*.yml): it needs the built site.
-#   make site-preview                                   (or: python scripts/build_site.py --preview ...)
+# Reference web recipe of spec 014 and browser suite of spec 013-site-languages (US1-AS1, US1-AS8, US1-AS14, D-026).
+# Not run by `make integration-test` (its glob is tests/*.yml): it needs the built site.
+#   make site-preview                                   (or: python scripts/build_site.py --out build/site --preview-languages fr,de,it,es,zh)
 #   python -m http.server 8000 --directory build/site   (any server of the build folder)
-#   venom run tests/site/site-languages.yml --var siteUrl=http://localhost:8000
-# The web executor cannot read a scroll width, so "no sideways scroll at 320 px" is checked by eye (T046) and by the CSS guards
-# of scripts/test_site_look.py. This suite proves what the executor can: every language's pages load at 320 px with their
-# language control and search button, and the Chinese search keeps matching one character, a run of characters and two
-# terms separated by a full-width space (U+3000).
+#   venom run tests/site/site-languages.yml --var appUrl=http://localhost:8000
+# Check it without a browser: venom recipe check --specs-dir docs/specs tests/site/site-languages.yml
+# The width cases read scrollWidth and clientWidth through `execute`: a page that scrolls sideways at 320 px makes the
+# difference positive and the case fail. The negative control of those cases is a copy that expects 1.
 vars:
-  siteUrl: http://localhost:8000
+  spec: 013-site-languages
+  appUrl: http://localhost:8000
   web:
     driver: chrome
     width: 320
     height: 800
     headless: true
 testcases:
-- name: English home loads at 320 px
+- name: US1-AS1 the English home page lists six languages and marks English
   steps:
   - type: web
     action:
       navigate:
-        url: "{{.siteUrl}}/"
-    assertions:
-    - result.title ShouldNotBeEmpty
+        url: "{{.appUrl}}/"
   - type: web
     action:
-      find: .lang-menu
+      find: .lang-panel a
     assertions:
-    - result.find ShouldBeGreaterThan 0
+    - result.find ShouldEqual 6
+  - type: web
+    action:
+      find: .lang-current
+    assertions:
+    - result.text ShouldEqual English
 
-- name: French home loads at 320 px
+- name: US1-AS1 the French home page lists six languages and marks Français
   steps:
   - type: web
     action:
       navigate:
-        url: "{{.siteUrl}}/fr/"
-    assertions:
-    - result.title ShouldNotBeEmpty
+        url: "{{.appUrl}}/fr/"
   - type: web
     action:
-      find: .lang-menu
+      find: .lang-panel a
     assertions:
-    - result.find ShouldBeGreaterThan 0
+    - result.find ShouldEqual 6
+  - type: web
+    action:
+      find: .lang-current
+    assertions:
+    - result.text ShouldEqual Français
 
-- name: German home loads at 320 px
+- name: US1-AS1 the German home page lists six languages and marks Deutsch
   steps:
   - type: web
     action:
       navigate:
-        url: "{{.siteUrl}}/de/"
-    assertions:
-    - result.title ShouldNotBeEmpty
+        url: "{{.appUrl}}/de/"
   - type: web
     action:
-      find: .lang-menu
+      find: .lang-panel a
     assertions:
-    - result.find ShouldBeGreaterThan 0
+    - result.find ShouldEqual 6
+  - type: web
+    action:
+      find: .lang-current
+    assertions:
+    - result.text ShouldEqual Deutsch
 
-- name: Italian home loads at 320 px
+- name: US1-AS1 the Italian home page lists six languages and marks Italiano
   steps:
   - type: web
     action:
       navigate:
-        url: "{{.siteUrl}}/it/"
-    assertions:
-    - result.title ShouldNotBeEmpty
+        url: "{{.appUrl}}/it/"
   - type: web
     action:
-      find: .lang-menu
+      find: .lang-panel a
     assertions:
-    - result.find ShouldBeGreaterThan 0
+    - result.find ShouldEqual 6
+  - type: web
+    action:
+      find: .lang-current
+    assertions:
+    - result.text ShouldEqual Italiano
 
-- name: Spanish home loads at 320 px
+- name: US1-AS1 the Spanish home page lists six languages and marks Español
   steps:
   - type: web
     action:
       navigate:
-        url: "{{.siteUrl}}/es/"
-    assertions:
-    - result.title ShouldNotBeEmpty
+        url: "{{.appUrl}}/es/"
   - type: web
     action:
-      find: .lang-menu
+      find: .lang-panel a
     assertions:
-    - result.find ShouldBeGreaterThan 0
+    - result.find ShouldEqual 6
+  - type: web
+    action:
+      find: .lang-current
+    assertions:
+    - result.text ShouldEqual Español
 
-- name: Chinese home loads at 320 px
+- name: US1-AS1 the Chinese home page lists six languages and marks 中文
   steps:
   - type: web
     action:
       navigate:
-        url: "{{.siteUrl}}/zh/"
-    assertions:
-    - result.title ShouldNotBeEmpty
+        url: "{{.appUrl}}/zh/"
   - type: web
     action:
-      find: .lang-menu
+      find: .lang-panel a
     assertions:
-    - result.find ShouldBeGreaterThan 0
+    - result.find ShouldEqual 6
+  - type: web
+    action:
+      find: .lang-current
+    assertions:
+    - result.text ShouldEqual 中文
 
-- name: Chinese search finds a one-character term (US1-AS8)
+- name: US1-AS14 the English home page does not scroll sideways at 320 px
   steps:
   - type: web
     action:
       navigate:
-        url: "{{.siteUrl}}/zh/"
+        url: "{{.appUrl}}/"
+  - type: web
+    action:
+      execute:
+        command: "return document.documentElement.scrollWidth - document.documentElement.clientWidth;"
+    assertions:
+    - result.valuejson ShouldEqual 0
+
+- name: US1-AS14 the French home page does not scroll sideways at 320 px
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}/fr/"
+  - type: web
+    action:
+      execute:
+        command: "return document.documentElement.scrollWidth - document.documentElement.clientWidth;"
+    assertions:
+    - result.valuejson ShouldEqual 0
+
+- name: US1-AS14 the German home page does not scroll sideways at 320 px
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}/de/"
+  - type: web
+    action:
+      execute:
+        command: "return document.documentElement.scrollWidth - document.documentElement.clientWidth;"
+    assertions:
+    - result.valuejson ShouldEqual 0
+
+- name: US1-AS14 the Italian home page does not scroll sideways at 320 px
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}/it/"
+  - type: web
+    action:
+      execute:
+        command: "return document.documentElement.scrollWidth - document.documentElement.clientWidth;"
+    assertions:
+    - result.valuejson ShouldEqual 0
+
+- name: US1-AS14 the Spanish home page does not scroll sideways at 320 px
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}/es/"
+  - type: web
+    action:
+      execute:
+        command: "return document.documentElement.scrollWidth - document.documentElement.clientWidth;"
+    assertions:
+    - result.valuejson ShouldEqual 0
+
+- name: US1-AS14 the Chinese home page does not scroll sideways at 320 px
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}/zh/"
+  - type: web
+    action:
+      execute:
+        command: "return document.documentElement.scrollWidth - document.documentElement.clientWidth;"
+    assertions:
+    - result.valuejson ShouldEqual 0
+
+- name: US1-AS8 Chinese search finds a one-character term
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}/zh/"
   - type: web
     action:
       click:
@@ -120,12 +217,12 @@ testcases:
     assertions:
     - result.find ShouldBeGreaterThan 0
 
-- name: Chinese search finds a longer term inside a run of characters (US1-AS8)
+- name: US1-AS8 Chinese search finds a longer term inside a run of characters
   steps:
   - type: web
     action:
       navigate:
-        url: "{{.siteUrl}}/zh/"
+        url: "{{.appUrl}}/zh/"
   - type: web
     action:
       click:
@@ -141,12 +238,12 @@ testcases:
     assertions:
     - result.find ShouldBeGreaterThan 0
 
-- name: Chinese search finds two terms joined by a full-width space (US1-AS8)
+- name: US1-AS8 Chinese search finds two terms joined by a full-width space
   steps:
   - type: web
     action:
       navigate:
-        url: "{{.siteUrl}}/zh/"
+        url: "{{.appUrl}}/zh/"
   - type: web
     action:
       click:

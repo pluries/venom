@@ -28,7 +28,7 @@ func TestRunCmd(t *testing.T) {
 	rootCmd := New()
 	rootCmd.SetArgs(validArgs)
 	venom.IsTest = "test"
-	assert.Equal(t, 2, len(rootCmd.Commands()))
+	assert.Equal(t, 3, len(rootCmd.Commands()))
 	err := rootCmd.Execute()
 	assert.NoError(t, err)
 	err = rootCmd.Execute()
@@ -42,5 +42,12 @@ func TestRootHasNoUpdateCommand(t *testing.T) {
 	for _, c := range New().Commands() {
 		names = append(names, c.Name())
 	}
-	assert.ElementsMatch(t, []string{"run", "version"}, names)
+	assert.ElementsMatch(t, []string{"run", "version", "recipe"}, names)
+}
+
+// TestRootHasRecipeCommand pins spec 014: `venom recipe` resolves from the root command.
+func TestRootHasRecipeCommand(t *testing.T) {
+	cmd, _, err := New().Find([]string{"recipe"})
+	assert.NoError(t, err)
+	assert.Equal(t, "recipe", cmd.Name())
 }

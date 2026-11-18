@@ -1,0 +1,21 @@
+# needs: device
+# A mobile recipe: it drives an app on a phone or an emulator through Appium, so it only runs where one exists.
+#   venom run --var-from-file android.vars.yml mobile-counter.yml
+# The variable file belongs to you and stays out of git (see tests/recipes/reference/mobile/counter.yml).
+name: Counter app, tap and read
+vars:
+  spec: 008-mobile-executor
+testcases:
+  - name: US1-AS4 the increment button is found by its accessibility id
+    steps:
+      - type: mobile
+        action: waitFor
+        accessibilityId: Increment
+        syncTimeout: 240
+        assertions:
+          - result.found ShouldBeTrue
+      - type: mobile
+        action: read
+        accessibilityId: Increment
+        assertions:
+          - result.found ShouldBeTrue

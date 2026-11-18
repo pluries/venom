@@ -1,0 +1,45 @@
+name: Recipe page, title and list
+# Run it against any address of the page: venom run --var appUrl=<address of the page> web-page.yml
+vars:
+  spec: 014-web-mobile-recipes
+  appUrl: http://localhost:8000
+  web:
+    driver: chrome
+    headless: true
+testcases:
+  - name: US1-AS1 the page shows its title and heading
+    steps:
+      - type: web
+        action:
+          navigate:
+            url: "{{.appUrl}}"
+        assertions:
+          - result.title ShouldEqual "Recipe fixture page"
+      - type: web
+        action:
+          find: '[data-test="heading"]'
+        assertions:
+          - result.find ShouldEqual 1
+          - result.text ShouldEqual "Recipe fixture"
+
+  - name: US1-AS3 an item typed in the input is added to the list
+    steps:
+      - type: web
+        action:
+          navigate:
+            url: "{{.appUrl}}"
+      - type: web
+        action:
+          fill:
+            - find: '[data-test="item-input"]'
+              text: milk
+      - type: web
+        action:
+          click:
+            find: '[data-test="add-button"]'
+      - type: web
+        action:
+          find: '[data-test="item"]'
+        assertions:
+          - result.find ShouldEqual 1
+          - result.text ShouldEqual milk

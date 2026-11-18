@@ -1,0 +1,51 @@
+# Reference mobile recipe: the Flutter counter app that executors/mobile/examples/flutter.yml drives.
+# Run it with the variables of a platform, as in that example (the file is yours, not committed):
+#   venom run --var-from-file android.vars.yml tests/recipes/reference/mobile/counter.yml
+# Check it without a device: venom recipe check --specs-dir docs/specs tests/recipes/reference/mobile
+#
+# Scenarios of spec 008-mobile-executor and what the flow proves of each:
+# - US1-AS4 (an element is found by its accessibility id): proved in part. The button is found by accessibility id and
+#   read, and so is the counter that appears after the tap. The refusal of two locators is not exercised here.
+# - US5-AS1 (one suite passes on Android and on iOS): proved on the platform of the variable file only. The suite holds
+#   no platform value; only a run with each platform's file, one after the other, proves both.
+# Left out on purpose: the scenario of an element that appears late (the wait here has no delay to measure) and the
+# one of every action (the flow uses waitFor, read and tap only).
+name: Flutter counter app, find, tap, read
+vars:
+  spec: 008-mobile-executor
+testcases:
+  - name: US1-AS4 the increment button is found by its accessibility id
+    steps:
+      - type: mobile
+        action: waitFor
+        accessibilityId: Increment
+        syncTimeout: 240
+        assertions:
+          - result.found ShouldBeTrue
+      - type: mobile
+        action: read
+        accessibilityId: Increment
+        assertions:
+          - result.found ShouldBeTrue
+  - name: US5-AS1 the counter shows 1 after one tap on the platform of the variable file
+    steps:
+      - type: mobile
+        action: waitFor
+        accessibilityId: Increment
+        syncTimeout: 240
+        assertions:
+          - result.found ShouldBeTrue
+      - type: mobile
+        action: tap
+        accessibilityId: Increment
+      - type: mobile
+        action: waitFor
+        accessibilityId: "1"
+        assertions:
+          - result.found ShouldBeTrue
+      - type: mobile
+        action: read
+        accessibilityId: "1"
+        attribute: "{{.readattr}}"
+        assertions:
+          - result.value ShouldEqual 1

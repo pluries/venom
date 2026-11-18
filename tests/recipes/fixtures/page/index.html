@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Recipe fixture page</title>
+</head>
+<body>
+<h1 data-test="heading">Recipe fixture</h1>
+<input type="text" data-test="item-input" placeholder="New item">
+<button type="button" data-test="add-button">Add</button>
+<ul data-test="list"></ul>
+<script>
+document.querySelector('[data-test="add-button"]').addEventListener('click', function () {
+  var input = document.querySelector('[data-test="item-input"]');
+  if (input.value === '') {
+    return;
+  }
+  var item = document.createElement('li');
+  item.setAttribute('data-test', 'item');
+  item.textContent = input.value;
+  document.querySelector('[data-test="list"]').appendChild(item);
+  input.value = '';
+});
+</script>
+</body>
+</html>

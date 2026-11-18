@@ -162,6 +162,13 @@
       ]
     },
     {
+      "slug": "recipes",
+      "title": "Recipes",
+      "source": "site/pages/recipes.md",
+      "group": "Guides",
+      "description": "Write browser and mobile tests as recipes that a check and a negative control can prove."
+    },
+    {
       "slug": "contributing",
       "title": "Contributing",
       "source": "CONTRIBUTING.md",

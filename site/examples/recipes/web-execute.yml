@@ -1,0 +1,22 @@
+name: Recipe page, a value read with execute
+# execute runs a script in the page and returns a value. Here it reads two numbers that find cannot read.
+vars:
+  spec: 014-web-mobile-recipes
+  appUrl: http://localhost:8000
+  web:
+    driver: chrome
+    headless: true
+testcases:
+  - name: US2-AS1 the list is empty and the page does not scroll sideways
+    steps:
+      - type: web
+        action:
+          navigate:
+            url: "{{.appUrl}}"
+      - type: web
+        action:
+          execute:
+            command: "return {overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, items: document.querySelectorAll('[data-test=\"item\"]').length};"
+        assertions:
+          - result.valuejson.overflow ShouldEqual 0
+          - result.valuejson.items ShouldEqual 0
