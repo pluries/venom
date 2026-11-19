@@ -1,0 +1,204 @@
+name: Recipe fixture page, web actions
+# The actions fixture of spec 015: the role, text, placeholder and test-id locators and the actions waitFor, hover,
+# dragAndDrop and press. It passes `venom recipe check`; the page it reads is the one of the clean fixture.
+#   venom run tests/recipes/fixtures/actions/page.yml --var appUrl=<address of tests/recipes/fixtures/page/index.html>
+# The address of the page is the variable appUrl; the recipe holds no other address. That page marks its elements with
+# data-test, so the recipe sets web.testIdAttribute to match (the default is data-testid).
+vars:
+  spec: 015-web-recipe-actions
+  appUrl: http://localhost:8000
+  web:
+    driver: chrome
+    headless: true
+    testIdAttribute: data-test
+testcases:
+- name: US1-AS1 the button is found by its role and its exact name
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}"
+  - type: web
+    action:
+      find:
+        locator: ROLE
+        selector: button
+        name: Add
+        exact: true
+    assertions:
+    - result.find ShouldEqual 1
+    - result.text ShouldEqual Add
+
+- name: US1-AS2 the heading is found by its text
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}"
+  - type: web
+    action:
+      find:
+        locator: TEXT
+        selector: Recipe fixture
+    assertions:
+    - result.find ShouldEqual 1
+    - result.text ShouldEqual "Recipe fixture"
+
+- name: US1-AS4 an item typed in the input found by its placeholder is added to the list
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}"
+  - type: web
+    action:
+      fill:
+      - find:
+          locator: PLACEHOLDER
+          selector: New item
+        text: milk
+  - type: web
+    action:
+      click:
+        find:
+          locator: ROLE
+          selector: button
+          name: Add
+  - type: web
+    action:
+      waitFor:
+        find:
+          locator: TESTID
+          selector: item
+        state: visible
+        syncTimeout: 5
+  - type: web
+    action:
+      find:
+        locator: TESTID
+        selector: item
+    assertions:
+    - result.find ShouldEqual 1
+    - result.text ShouldEqual milk
+
+- name: US2-AS3 no item is left once the wait for hidden has passed
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}"
+  - type: web
+    action:
+      waitFor:
+        find:
+          locator: TESTID
+          selector: item
+        state: hidden
+  - type: web
+    action:
+      find:
+        locator: TESTID
+        selector: item
+    assertions:
+    - result.find ShouldEqual 0
+
+- name: US3-AS1 the pointer moves onto the heading
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}"
+  - type: web
+    action:
+      hover:
+        find:
+          locator: TESTID
+          selector: heading
+  - type: web
+    action:
+      find:
+        locator: TESTID
+        selector: heading
+    assertions:
+    - result.find ShouldEqual 1
+    - result.text ShouldEqual "Recipe fixture"
+
+- name: US3-AS2 the button is dragged onto the heading and the page is unchanged
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}"
+  - type: web
+    action:
+      dragAndDrop:
+        from:
+          locator: ROLE
+          selector: button
+          name: Add
+        to:
+          locator: TESTID
+          selector: heading
+  - type: web
+    action:
+      find:
+        locator: ROLE
+        selector: button
+        name: Add
+        exact: true
+    assertions:
+    - result.find ShouldEqual 1
+  - type: web
+    action:
+      find:
+        locator: TESTID
+        selector: list
+    assertions:
+    - result.find ShouldEqual 1
+
+- name: US3-AS3 a key pressed with nothing named goes to the focused input
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}"
+  - type: web
+    action:
+      click:
+        find:
+          locator: TESTID
+          selector: item-input
+  - type: web
+    action:
+      press:
+        key: Enter
+  - type: web
+    action:
+      find:
+        locator: TESTID
+        selector: item
+    assertions:
+    - result.find ShouldEqual 0
+
+- name: US3-AS4 a chord pressed on a named element keeps the input empty
+  steps:
+  - type: web
+    action:
+      navigate:
+        url: "{{.appUrl}}"
+  - type: web
+    action:
+      press:
+        key: Control+A
+        find:
+          locator: TESTID
+          selector: item-input
+        syncTimeout: 5
+  - type: web
+    action:
+      find:
+        locator: TESTID
+        selector: item-input
+    assertions:
+    - result.find ShouldEqual 1
+    - result.value ShouldEqual ""

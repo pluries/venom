@@ -54,6 +54,9 @@ You can define parameters to configure the browser used during the test suite. A
 * binaryPath: browser executable to use instead of Playwright's (`chrome` only)
 * trace (default: `false`): save a Playwright trace of each failing step in `page.trace.zip`. See
   [Failure diagnostics](#failure-diagnostics)
+* testIdAttribute (default: `data-testid`): the attribute a `TESTID` locator reads (see [Locators](#locators)). Set it
+  once for the suite, for a page that marks its elements with `data-test` or another name. See [Traps](#traps). The name
+  must match `^[A-Za-z_][A-Za-z0-9_:.-]*$`: any other value fails Setup, before the browser starts
 
 Chromium runs with its sandbox on, as it did under chromedriver. A suite that needs it off (in a container running as
 root, for example) passes `--no-sandbox` in `args`. A host that restricts unprivileged user namespaces, as native
@@ -73,10 +76,12 @@ Still accepted, **ignored with a warning** — they have no Playwright equivalen
 ## Action
 Actions allow you to manipulate the browser
 
-An action on an element (`click`, `fill`, `select`, `uploadFile`, `selectFrame`) waits for the element to be ready,
-up to its `syncTimeout` or 30 seconds. `find` never waits: it counts the elements present now, so
-`result.find ShouldEqual 0` stays fast. After an action that can load a page (`click`, `fill`, `select`,
-`uploadFile`, `execute`, a popup answer), the step waits for the page to finish loading before it reads
+An action on an element (`click`, `fill`, `select`, `uploadFile`, `selectFrame`, `hover`, `dragAndDrop`, and `press`
+with `find`) waits for the element to be ready, up to its `syncTimeout` or 30 seconds. `waitFor` waits for the element to
+reach its `state`, within its `syncTimeout`. `find` never waits: it counts the elements present now, so
+`result.find ShouldEqual 0` stays fast. `find`, `waitFor`, `hover`, `dragAndDrop` and `press`, like the actions above,
+wait for a navigation already in flight before they run. After an action that can load a page (`click`, `fill`, `select`,
+`uploadFile`, `execute`, `waitFor`, `hover`, `dragAndDrop`, `press`, a popup answer), the step waits for the page to finish loading before it reads
 `result.title` and `result.url`. That includes a navigation the page starts on its own, from a script
 (`location.href = …`) or from a timer with no delay. A navigation that does not finish within `timeout` fails the step,
 and the following steps too, until a `navigate` replaces it. No `page.dump.html` is written while the page navigates.
@@ -118,7 +123,7 @@ Search an element from a selector
 
 #### Input
 * Selector: Expression to use to identify web element
-* Locator: Locator to use to search element (CSS or XPATH)
+* Locator: Locator to use to search element: `CSS` or `XPATH`, or one of the kinds in [Locators](#locators)
 
 #### Output
 * result.find: returns the number of objects identified
@@ -142,6 +147,69 @@ Search an element from a selector
     - result.find ShouldEqual 1
     - result.value ShouldEqual Recherche Google
 ```
+
+### Locators
+A `find` element names its kind in `locator`. Besides `CSS` and `XPATH`, five kinds match what a user sees or what the
+page marks for tests. Prefer them to a CSS path: they survive a restyle of the page.
+
+#### Input
+* `locator: ROLE`: `selector` is an ARIA role (`button`, `link`, `textbox`, `checkbox`, `heading`, `listitem`, ...).
+  `name` is optional and filters by the accessible name of the element; an empty `name` means no name filter
+* `locator: TEXT`: `selector` is the text of the element
+* `locator: LABEL`: `selector` is the text of the label of a form field
+* `locator: PLACEHOLDER`: `selector` is the placeholder of a field
+* `locator: TESTID`: `selector` is the test id. It reads the attribute `data-testid`, or the attribute that the variable
+  `testIdAttribute` sets. It matches the whole value and takes no `exact`
+* `exact` (`true` or `false`, default `false`): for `ROLE` it applies to `name`, and for `TEXT`, `LABEL` and `PLACEHOLDER`
+  to `selector`
+
+By default `TEXT`, `LABEL` and a `ROLE` name match case-insensitively, as a substring, and ignore extra white space: the
+text `add` matches the button `Add item`. With `exact: true` the match is the whole text, with the case as written.
+`PLACEHOLDER` matches the attribute as it is written.
+
+A value is always read as plain text. It is never a CSS selector, an engine prefix or a regular expression. A step that
+finds several elements uses the first one.
+
+#### Example
+```yaml
+  - type: web
+    action:
+      click:
+        find:
+          locator: ROLE
+          selector: button
+          name: Add item
+          exact: true
+
+  - type: web
+    action:
+      fill:
+      - find:
+          locator: LABEL
+          selector: Email
+        text: user@example.com
+
+  - type: web
+    action:
+      find:
+        locator: TESTID
+        selector: cart-count
+    assertions:
+    - result.find ShouldEqual 1
+```
+
+#### Errors
+A step with a wrong `find` fails before it acts, and the message names the key:
+* a `locator` that is not one of the seven kinds: `invalid find element locator 'X' (must be CSS, XPATH, ROLE, TEXT, LABEL, PLACEHOLDER or TESTID)`
+* a `ROLE` selector that is not an ARIA role: the message lists the roles
+* an empty `selector` for `TEXT`, `LABEL`, `PLACEHOLDER` or `TESTID`
+* a `TESTID` selector that holds a NUL character
+* `name` on a kind other than `ROLE`, or `exact` on `TESTID`: the message says which kinds take it
+* `name` that is not a string, or `exact` that is not `true` or `false`
+* any other key: `invalid find element key 'X' for a ROLE locator (must be locator, selector, name, exact)`
+
+These checks apply to the five kinds of this section. The extra keys of a `CSS` or `XPATH` element are ignored, as they
+always were.
 
 ### Click
 Click on an element from a selector
@@ -234,6 +302,151 @@ An integer value to define number of seconds to wait
     action:
       wait: 1
 ```
+
+### Wait for
+Wait until an element is in a state. Use it when the page loads data or opens a panel after the first paint.
+
+#### Input
+* Find: Element to wait for (More information in find and [Locators](#locators))
+* State: `visible` (default, also when `state` is empty), `hidden`, `attached` or `detached`
+  * `visible`: the element exists and shows
+  * `hidden`: the element is missing or not shown
+  * `attached`: the element exists in the page, shown or not
+  * `detached`: the element is not in the page
+* SyncTimeout: maximum time, in seconds, to wait for the state. Default: `30`. A value of `0` or less means `30`
+
+For `visible`, the step waits on the first match.
+
+Each check looks at the first element that matches at that moment. If that element is removed and another one still matches, the wait goes on with the next one. `detached` waits until no element matches any more: when the first element is removed, the next one becomes the first, so with several matches it waits until none is left. `hidden` follows the first element that matches, which stays the same element while it exists (an element hidden with CSS still matches), so with several matches `hidden` can end while the others are still shown. To wait until every one of them is hidden, wait for `detached`, or give each element its own locator.
+
+#### Example
+```yaml
+  - type: web
+    action:
+      waitFor:
+        find:
+          locator: TEXT
+          selector: Order saved
+        state: visible
+        syncTimeout: 10
+
+  - type: web
+    action:
+      waitFor:
+        find:
+          locator: TESTID
+          selector: spinner
+        state: hidden
+```
+
+#### Errors
+* `waitFor: the field 'find' is required (allowed: find, state, syncTimeout)`
+* `waitFor: invalid 'state' X (allowed: visible, hidden, attached, detached)`: the state is case-sensitive
+* a field other than `find`, `state` and `syncTimeout`: `waitFor: unknown field 'X' (allowed: find, state, syncTimeout)`
+* the state is not reached in time: `waitFor: the element ROLE "button" name "Add" did not become visible within 30s`, followed by
+  the browser's reason
+
+### Hover
+Move the pointer onto an element, to open a menu or a tooltip that shows on hover. The step waits for the element to be
+ready, as a click does.
+
+#### Input
+* Find: Element to hover (More information in find and [Locators](#locators)). The first match is used
+* SyncTimeout: maximum time, in seconds, to wait for the element to be ready. Default: `30`
+
+#### Example
+```yaml
+  - type: web
+    action:
+      hover:
+        find:
+          locator: ROLE
+          selector: link
+          name: Products
+
+  - type: web
+    action:
+      waitFor:
+        find:
+          locator: ROLE
+          selector: menuitem
+          name: Shoes
+```
+
+#### Errors
+* `hover: the field 'find' is required (allowed: find, syncTimeout)`
+* a field other than `find` and `syncTimeout`: `hover: unknown field 'X' (allowed: find, syncTimeout)`
+* the element is not ready in time: `hover: ROLE "link" name "Products"`, followed by the browser's reason
+
+### Drag and drop
+Drag an element and drop it on another. The step waits for both to be ready.
+
+#### Input
+* From: Element to drag (More information in find and [Locators](#locators)). The first match is used
+* To: Element to drop on. The first match is used
+* SyncTimeout: maximum time, in seconds, to wait for the drag to complete. Default: `30`
+
+#### Example
+```yaml
+  - type: web
+    action:
+      dragAndDrop:
+        from:
+          locator: TEXT
+          selector: Task A
+          exact: true
+        to:
+          locator: TESTID
+          selector: column-done
+```
+
+#### Errors
+* `dragAndDrop: the field 'from' is required (allowed: from, to, syncTimeout)`, and the same for `to`
+* a field other than `from`, `to` and `syncTimeout`: `dragAndDrop: unknown field 'X' (allowed: from, to, syncTimeout)`
+* the drop fails or times out: `dragAndDrop: TEXT "Task A" exact to TESTID "column-done"`, followed by the browser's reason
+
+### Press
+Press one key or one chord, such as `Enter`, `Escape`, `Tab` or `Control+A`. With `find`, the key goes to that element.
+Without it, the key goes to the element that has the focus. `press` takes one key or one chord, not a text: to type a
+text, use `fill`.
+
+#### Input
+* Key: the key or the chord (required). It is case-sensitive. Use a Playwright key name (`Enter`, `ArrowDown`, `F5`,
+  `Backspace`) or a one-character key (`a`, `7`). A chord joins keys with `+`: `Control+A`, `Shift+Tab`. The WebDriver
+  names that `fill` accepts for `key` (`ENTER`, `ESCAPE`, `ARROW_DOWN`) also work, as a single key. A chord takes
+  Playwright names only. `press` accepts the key names of a fixed list; a rare Playwright key that is not in it
+  (`ShiftLeft`, `ControlLeft`, `CapsLock`, `ContextMenu`, `NumLock`, `ScrollLock`, `PrintScreen`, `AltGraph`, `F13` and
+  above) is refused with a message that names the key, and a wrong key is never sent. A one-character key is always
+  accepted
+* Find: Element to send the key to (More information in find and [Locators](#locators)). Optional. The first match is used
+* SyncTimeout: maximum time, in seconds, to wait for the element to be ready. Default: `30`. Without `find` no element is
+  involved, so it is not a wait for an element: it only extends the limit on the key call itself (60 seconds, plus
+  `syncTimeout`)
+
+#### Example
+```yaml
+  - type: web
+    action:
+      press:
+        key: Enter
+        find:
+          locator: PLACEHOLDER
+          selector: Search
+
+  - type: web
+    action:
+      press:
+        key: Control+A
+```
+
+#### Errors
+* `press: the field 'key' is required (allowed: key, find, syncTimeout): press takes one key or one chord`
+* a field other than `key`, `find` and `syncTimeout`: `press: unknown field 'X' (allowed: key, find, syncTimeout)`
+* a `key` that is not a text, a YAML number such as `key: 5`: the message says to quote it (`key: "5"`)
+* a key that is not known, or a text: `press: invalid 'key' "X": not a key name; press takes one key or one chord`. In a
+  chord, the message names the part that failed
+* a WebDriver key that Playwright has no key for (`NULL`, `CANCEL`, `HELP`): the message says it has no Playwright
+  equivalent
 
 ### Select frame
 Select a frame presents in the current page
@@ -464,6 +677,15 @@ The trace holds everything the step saw and typed, **passwords included**, and t
 calls. venom's masking of secrets does not apply to it. venom writes it readable by its owner only, as
 `page.dump.html`. Do not publish it as a build artefact or commit it. Tracing
 also slows each step down, by about 20 ms on a simple page: turn it on while you investigate a failure.
+
+## Traps
+* A mistyped selector passes `waitFor` with the state `hidden` or `detached` at once: an element that does not exist is
+  hidden and detached. Check the selector with a `find` or a `visible` wait first.
+* `TESTID` reads `data-testid` by default. A page that marks its elements with `data-test` (or another name) is not
+  found until the suite sets `testIdAttribute`. Without it the step fails to find the element.
+* The page dump (`page.dump.html`) and the trace hold what `fill` and `press` typed. venom's masking of secrets does not
+  reach them. Do not type a secret with `press`, one key at a time. See [Failure diagnostics](#failure-diagnostics).
+* `press` is not typing. It sends keys, not a text: `press: Hello` fails. Use `fill` to enter a text.
 
 ## Example
 A global example

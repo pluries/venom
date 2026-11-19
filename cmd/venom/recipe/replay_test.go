@@ -193,6 +193,38 @@ func TestTwentyReplaysAreIdentical(t *testing.T) {
 	assert.Equal(t, 0, first.Exit, first.Output)
 }
 
+func actionsRecipe(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(fixturesDir(t), "actions", "page.yml")
+}
+
+// US3-AS2 (T023): the actions fixture replays against the fixture page and exits 0, every testcase PASS.
+func TestActionsFixtureReplaysAndExitsZero(t *testing.T) {
+	result := replay(t, actionsRecipe(t), pageURL(t))
+
+	assert.Equal(t, 0, result.Exit, result.Output)
+	assert.NotEmpty(t, result.Statuses, result.Output)
+	for name, status := range result.Statuses {
+		assert.Equal(t, "PASS", status, name)
+	}
+}
+
+// T023: a copy of the actions fixture whose first testcase expects another value exits 2 and names that testcase.
+func TestActionsFixtureWithAWrongExpectedValueExitsTwoAndNamesTheTestcase(t *testing.T) {
+	original, err := os.ReadFile(actionsRecipe(t)) //nolint:gosec // the fixture under test
+	require.NoError(t, err)
+	names, nodes := firstMutableAssertion(t, original)
+	require.NotEmpty(t, names)
+	require.NotNil(t, nodes[0], "the first testcase has no app-reading assertion that a changed expected value can fail")
+	copyPath := filepath.Join(t.TempDir(), "control.yml")
+	require.NoError(t, os.WriteFile(copyPath, mutated(original, nodes[0]), 0o600))
+
+	result := replay(t, copyPath, pageURL(t))
+
+	assert.Equal(t, 2, result.Exit, result.Output)
+	assert.Contains(t, result.Output, fmt.Sprintf("Testcase %q", names[0]))
+}
+
 // appFieldPrefix matches an assertion that reads the application.
 var appFieldPrefix = regexp.MustCompile(`^result\.(find|title|url|text|html|value|valuejson|count|found|source|context|device|platform)\b`)
 

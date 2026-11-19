@@ -1,6 +1,10 @@
 package web
 
-import "github.com/mxschmitt/playwright-go"
+import (
+	"fmt"
+
+	"github.com/mxschmitt/playwright-go"
+)
 
 // The Playwright implementation of the seam (page.go). Every call into playwright-go lives here, and only here: one
 // delegation per method, no behaviour, so all the behaviour is in code the browser-free unit tests cover. The
@@ -80,11 +84,41 @@ type pwPage struct{ playwright.Page }
 
 func (p pwPage) mainFrame() frame { return pwFrame{p.MainFrame()} }
 
+func (p pwPage) pressKey(key string) error { return p.Keyboard().Press(key) }
+
 type pwFrame struct{ playwright.Frame }
 
 func (f pwFrame) locator(selector string) element { return pwLocator{f.Locator(selector)} }
 
+func (f pwFrame) getByRole(role playwright.AriaRole, name *string, exact bool) element {
+	o := playwright.FrameGetByRoleOptions{Exact: playwright.Bool(exact)}
+	if name != nil {
+		o.Name = *name
+	}
+	return pwLocator{f.GetByRole(role, o)}
+}
+
+func (f pwFrame) getByText(text string, exact bool) element {
+	return pwLocator{f.GetByText(text, playwright.FrameGetByTextOptions{Exact: playwright.Bool(exact)})}
+}
+
+func (f pwFrame) getByLabel(text string, exact bool) element {
+	return pwLocator{f.GetByLabel(text, playwright.FrameGetByLabelOptions{Exact: playwright.Bool(exact)})}
+}
+
+func (f pwFrame) getByPlaceholder(text string, exact bool) element {
+	return pwLocator{f.GetByPlaceholder(text, playwright.FrameGetByPlaceholderOptions{Exact: playwright.Bool(exact)})}
+}
+
 type pwLocator struct{ playwright.Locator }
+
+func (l pwLocator) dragTo(target element, o ...playwright.LocatorDragToOptions) error {
+	to, ok := target.(pwLocator)
+	if !ok {
+		return fmt.Errorf("dragTo: the drop target is a %T, not a Playwright locator", target)
+	}
+	return l.DragTo(to.Locator, o...)
+}
 
 func (l pwLocator) first() element { return pwLocator{l.First()} }
 

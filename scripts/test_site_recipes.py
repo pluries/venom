@@ -388,5 +388,172 @@ class SecretScan(unittest.TestCase):
         self.assertEqual(scan_secrets(files), [])
 
 
+# ---------- spec 015, story 4: the web README, the Recipes page and the pack brief (T022; US4-AS1, US4-AS2, FR-012) ----------
+
+WEB_README = ROOT / "executors" / "web" / "README.md"
+LOCATOR_KINDS = ("ROLE", "TEXT", "LABEL", "PLACEHOLDER", "TESTID")
+ACTION_SECTIONS = {  # the exact `### ` heading of each new action in the README, and the field names it must name
+    "Wait for": ("waitFor", "find", "state", "syncTimeout"),
+    "Hover": ("hover", "find", "syncTimeout"),
+    "Drag and drop": ("dragAndDrop", "from", "to", "syncTimeout"),
+    "Press": ("press", "key", "find", "syncTimeout"),
+}
+WAIT_STATES = ("visible", "hidden", "attached", "detached")
+CANNOT_WORDS = re.compile(r"(?i)\b(no step|cannot|can not|does not|has no|have no|without)\b")
+GAP_WORDS = re.compile(r"(?i)\b(hover|drag|keyboard shortcut|key press)\b")
+PREFER_ROLE_AND_TESTID = re.compile(r"(?is)\bprefer\b[^.\n]*\brole\b[^.\n]*\b(test[- ]?id|TESTID)\b")
+SEVERAL_MATCHES_CLAIM = re.compile(
+    r"(?is)\b(hidden|detached)\b[^.\n]*\bfirst match\b|\bfirst match\b[^.\n]*\b(is gone|hidden|detached)\b")
+
+
+def section_at(markdown: str, title: str, level: int) -> str:
+    """The text under the heading `title` of the given level (2 for `## `, 3 for `### `), up to the next heading of that
+    level or a shallower one (deeper headings stay inside). Headings inside code fences are not headings. An empty
+    string when there is no such heading."""
+    collected, inside, fenced = [], False, False
+    for line in markdown.split("\n"):
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        heading = None if fenced else re.match(r"(#{1,6})\s+(.+?)\s*$", line)
+        if heading and len(heading.group(1)) <= level:
+            inside = len(heading.group(1)) == level and heading.group(2) == title
+        elif inside:
+            collected.append(line)
+    return "\n".join(collected)
+
+
+def gap_sentences(text: str) -> list[str]:
+    """The sentences that name hover, drag or a key press and say the executor lacks it: what the list of gaps used to hold."""
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    return [x for x in sentences if GAP_WORDS.search(x) and CANNOT_WORDS.search(x)]
+
+
+class WebReadme(unittest.TestCase):
+    """US4-AS1: the README of the web executor names each new locator, action, field, default, error and trap."""
+
+    def setUp(self):
+        self.assertTrue(WEB_README.is_file(), "executors/web/README.md does not exist")
+        self.text = read(WEB_README)
+
+    def section(self, title: str, level: int = 3) -> str:
+        found = section_at(self.text, title, level)
+        self.assertTrue(found.strip(), f"README.md has no `{'#' * level} {title}` section, or it is empty")
+        return found
+
+    def test_the_locators_section_names_each_kind_and_its_keys(self):
+        text = self.section("Locators")
+        for kind in LOCATOR_KINDS:
+            self.assertRegex(text, rf"\b{kind}\b", f"`### Locators` never names {kind}")
+        for key in ("selector", "name", "exact"):
+            self.assertIn(key, text, f"`### Locators` never names the key `{key}`")
+        self.assertRegex(text, r"\bCSS\b")
+        self.assertRegex(text, r"\bXPATH\b")
+
+    def test_the_locators_section_names_the_default_match_and_the_role_table(self):
+        text = self.section("Locators")
+        self.assertRegex(text, r"(?i)case-insensitive", "the default match is not described as case-insensitive")
+        self.assertRegex(text, r"(?i)substring", "the default match is not described as a substring")
+        self.assertRegex(text, r"(?i)\baria\b", "the accepted ROLE names (ARIA roles) are not named")
+
+    def test_each_new_action_has_a_section_that_names_its_fields(self):
+        for title, words in ACTION_SECTIONS.items():
+            text = self.section(title)
+            for word in words:
+                self.assertIn(word, text, f"`### {title}` never names `{word}`")
+
+    def test_each_new_action_and_the_locators_have_an_errors_subsection(self):
+        for title in ("Locators", *ACTION_SECTIONS):
+            self.assertTrue(section_at(self.section(title), "Errors", 4).strip(), f"`### {title}` has no `#### Errors` subsection, or it is empty")
+
+    def test_the_wait_for_section_names_the_four_states_and_the_timeout_default(self):
+        text = self.section("Wait for")
+        for state in WAIT_STATES:
+            self.assertRegex(text, rf"\b{state}\b", f"`### Wait for` never names the state {state}")
+        self.assertRegex(text, r"\b30\b", "`### Wait for` never gives the 30 s default of syncTimeout")
+        self.assertRegex(text, r"(?i)\bseconds\b", "`### Wait for` never says that syncTimeout is in seconds")
+
+    def test_the_wait_for_section_says_nothing_yet_about_several_matches_with_hidden_or_detached(self):
+        # D-017 is open: what hidden and detached do with several matches is not decided, so the README does not claim it.
+        text = self.section("Wait for")
+        self.assertIsNone(SEVERAL_MATCHES_CLAIM.search(text), "the README claims what hidden or detached do with several matches (D-017 is open)")
+
+    def test_the_press_section_says_one_key_or_one_chord_and_not_a_text(self):
+        text = self.section("Press")
+        self.assertRegex(text, r"(?i)one key", "`### Press` never says that press takes one key")
+        self.assertRegex(text, r"(?i)\bchord\b", "`### Press` never names a chord")
+        self.assertIn("Control+A", text)
+        self.assertRegex(text, r"(?i)\b(not|never) a text\b", "`### Press` never says that press does not type a text")
+
+    def test_the_variables_section_names_the_test_id_attribute_and_its_default(self):
+        text = self.section("Variables", 2)
+        self.assertIn("testIdAttribute", text)
+        self.assertIn("data-testid", text)
+
+    def test_the_traps_section_names_each_trap(self):
+        text = self.section("Traps", 2)
+        for word in ("mistyped", "hidden", "detached", "at once"):
+            self.assertIn(word, text, f"`## Traps` never says `{word}` (a mistyped selector passes hidden and detached at once)")
+        self.assertIn("data-testid", text, "`## Traps` never names the default attribute data-testid")
+        self.assertRegex(text, r"data-test\b", "`## Traps` never contrasts data-testid with data-test")
+        for word in ("press", "fill", "dump", "trace"):
+            self.assertRegex(text, rf"(?i)\b{word}", f"`## Traps` never says that dumps and traces hold what press and fill typed: no `{word}`")
+
+
+class RecipesPageGuidance(unittest.TestCase):
+    """US4-AS2: the Recipes page stops listing the new actions and locators as gaps and recommends role and test-id locators."""
+
+    def setUp(self):
+        self.assertTrue(PAGE.is_file(), "site/pages/recipes.md does not exist")
+        self.text = read(PAGE)
+
+    def test_the_limits_section_no_longer_lists_hover_drag_or_a_key_press_as_missing(self):
+        text = section_at(self.text, "What the executors cannot do", 2)
+        self.assertTrue(text.strip(), "no `## What the executors cannot do` section")
+        self.assertEqual(gap_sentences(text), [], "the section still says the executors lack hover, drag or a key press")
+
+    def test_the_selectors_section_prefers_role_and_test_id_locators_over_a_css_path(self):
+        text = section_at(self.text, "Selectors", 2)
+        self.assertRegex(text, PREFER_ROLE_AND_TESTID, "the section never says to prefer role and test-id locators")
+        self.assertIn("CSS path", text, "the section never contrasts them with a CSS path")
+        for kind in ("ROLE", "TESTID"):
+            self.assertRegex(text, rf"\b{kind}\b", f"the section never shows the {kind} locator")
+
+    def test_the_selectors_section_warns_that_the_test_id_default_is_data_testid(self):
+        text = section_at(self.text, "Selectors", 2)
+        self.assertIn("web.testIdAttribute", text)
+        self.assertIn("data-testid", text)
+
+
+class PackBriefGuidance(unittest.TestCase):
+    """US4-AS2: the pack brief stops listing the new actions and locators as gaps and recommends role and test-id locators."""
+
+    def setUp(self):
+        self.assertTrue(BRIEF.is_file(), "pack-brief.md does not exist")
+        self.text = read(BRIEF)
+
+    def test_the_brief_no_longer_says_that_hover_drag_or_a_key_press_has_no_step(self):
+        self.assertEqual(gap_sentences(self.text), [], "the brief still says the executors lack hover, drag or a key press")
+
+    def test_the_brief_prefers_role_and_test_id_locators_over_a_css_path(self):
+        self.assertRegex(self.text, PREFER_ROLE_AND_TESTID, "the brief never says to prefer role and test-id locators")
+        self.assertIn("CSS path", self.text)
+        for kind in ("ROLE", "TESTID"):
+            self.assertRegex(self.text, rf"\b{kind}\b", f"the brief never names the {kind} locator")
+
+
+class SectionHelpers(unittest.TestCase):
+    def test_section_at_returns_deeper_headings_and_stops_at_the_next_of_its_level(self):
+        text = "## A\n### One\nx\n#### Errors\ne\n### Two\ny\n## B\nz\n```\n### Fake\n```\n"
+        self.assertEqual(section_at(text, "One", 3), "x\n#### Errors\ne")
+        self.assertEqual(section_at(text, "Errors", 4), "e")
+        self.assertEqual(section_at(text, "A", 2), "### One\nx\n#### Errors\ne\n### Two\ny")
+        self.assertEqual(section_at(text, "Fake", 3), "")
+
+    def test_gap_sentences_finds_the_old_wording_and_not_the_new(self):
+        old = "The web executor has no step for hover, drag or a keyboard shortcut. Use execute."
+        self.assertEqual(len(gap_sentences(old)), 1)
+        self.assertEqual(gap_sentences("The hover action moves the pointer. Use press for a key."), [])
+
+
 if __name__ == "__main__":
     unittest.main()

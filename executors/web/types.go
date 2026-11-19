@@ -16,6 +16,37 @@ type Action struct {
 	NextWindow      bool         `yaml:"nextWindow,omitempty"`
 	HistoryAction   string       `yaml:"historyAction,omitempy"`
 	Execute         *Execute     `yaml:"execute,omitempy"`
+	WaitFor         *WaitFor     `yaml:"waitFor,omitempty"`
+	Hover           *Hover       `yaml:"hover,omitempty"`
+	DragAndDrop     *DragAndDrop `yaml:"dragAndDrop,omitempty"`
+	Press           *Press       `yaml:"press,omitempty"`
+}
+
+// WaitFor represents informations needed to wait for an element to reach a state
+type WaitFor struct {
+	Find        interface{} `yaml:"find,omitempty"`
+	State       string      `yaml:"state,omitempty"`
+	SyncTimeout int64       `yaml:"syncTimeout"`
+}
+
+// Hover represents informations needed to move the pointer onto an element
+type Hover struct {
+	Find        interface{} `yaml:"find,omitempty"`
+	SyncTimeout int64       `yaml:"syncTimeout"`
+}
+
+// DragAndDrop represents informations needed to drag an element onto another
+type DragAndDrop struct {
+	From        interface{} `yaml:"from,omitempty"`
+	To          interface{} `yaml:"to,omitempty"`
+	SyncTimeout int64       `yaml:"syncTimeout"`
+}
+
+// Press represents informations needed to press one key or one chord
+type Press struct {
+	Key         string      `yaml:"key,omitempty"`
+	Find        interface{} `yaml:"find,omitempty"`
+	SyncTimeout int64       `yaml:"syncTimeout"`
 }
 
 // Fill represents informations needed to fill input/textarea

@@ -2,7 +2,14 @@ package web
 
 import (
 	"context"
+	"fmt"
+	"maps"
+	"regexp"
+	"slices"
 	"strconv"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/ovh/venom"
 )
@@ -147,4 +154,91 @@ func playwrightKey(ctx context.Context, name string) (key string, ok bool) {
 		venom.Warning(ctx, "web - fill: the key %s has no Playwright equivalent, it is not sent", name)
 	}
 	return "", false
+}
+
+// playwrightKeyList is the table of the key names Playwright's keyboard accepts (D-011), the names parsePress takes
+// alone or as the parts of a chord: every value of playwrightKeys and the names only Playwright has, each once.
+func playwrightKeyList() []string {
+	names := slices.Collect(maps.Values(playwrightKeys))
+	names = append(names,
+		"Backquote", "Minus", "Backslash", "BracketLeft", "BracketRight", "Quote", "Slash",
+		"ControlOrMeta", "NumpadDecimal", "NumpadEnter",
+	)
+	for i := 0; i <= 9; i++ {
+		d := strconv.Itoa(i)
+		names = append(names, d, "Digit"+d, "Numpad"+d)
+	}
+	for c := 'A'; c <= 'Z'; c++ {
+		names = append(names, "Key"+string(c))
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
+}
+
+var playwrightKeyNameSet = playwrightKeyList()
+
+// parsePress is the Playwright key or chord a press action sends for key; it refuses an empty key, a text, and a name
+// Playwright does not know, naming it.
+func parsePress(_ context.Context, key string) (string, error) {
+	parts := chordParts(key)
+	if len(parts) == 1 {
+		return singleKey(key, parts[0])
+	}
+	for _, part := range parts {
+		if !isPlaywrightKey(part) {
+			return "", pressRefusal(key, fmt.Sprintf("the part %s is not a Playwright key name or a one-character key, and a chord takes only those", describeValue(part)))
+		}
+	}
+	return key, nil
+}
+
+// chordParts splits key on "+"; a "+" that ends the key after another "+", or is the whole key, is the plus key.
+func chordParts(key string) []string {
+	if key == "+" {
+		return []string{key}
+	}
+	if head, ok := strings.CutSuffix(key, "++"); ok {
+		return append(strings.Split(head, "+"), "+")
+	}
+	return strings.Split(key, "+")
+}
+
+// isPlaywrightKey is a name of the table or a one-character printable key.
+func isPlaywrightKey(part string) bool {
+	if slices.Contains(playwrightKeyNameSet, part) {
+		return true
+	}
+	r, size := utf8.DecodeRuneInString(part)
+	return size > 0 && size == len(part) && unicode.IsPrint(r)
+}
+
+// singleKey is the key a press of one part sends: a Playwright key as written, a WebDriver name through playwrightKeys.
+func singleKey(key, part string) (string, error) {
+	if isPlaywrightKey(part) {
+		return part, nil
+	}
+	if mapped, ok := playwrightKeys[part]; ok {
+		return mapped, nil
+	}
+	if _, known := Keys[part]; known {
+		return "", pressRefusal(key, describeValue(part)+" has no Playwright equivalent")
+	}
+	return "", pressRefusal(key, "not a key name")
+}
+
+// keyNameLike matches a value that reads as a key name: a refusal may name it. Any other value may be a secret put in
+// press by mistake ({{.password}}), so a refusal gives its length only.
+var keyNameLike = regexp.MustCompile(`^[A-Za-z0-9_+]{1,20}$`)
+
+// describeValue is s quoted when it reads as a key name (or is empty), else only how long it is.
+func describeValue(s string) string {
+	if s == "" || keyNameLike.MatchString(s) {
+		return strconv.Quote(s)
+	}
+	return fmt.Sprintf("(a text of %d characters)", utf8.RuneCountInString(s))
+}
+
+func pressRefusal(key, reason string) error {
+	return fmt.Errorf("press: invalid 'key' %s: %s; press takes one key or one chord "+
+		"(a Playwright name such as Enter or a one-character key, alone or joined by + as in Control+A)", describeValue(key), reason)
 }

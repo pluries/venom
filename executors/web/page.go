@@ -56,11 +56,19 @@ type page interface {
 	GoForward(options ...playwright.PageGoForwardOptions) (playwright.Response, error)
 	Reload(options ...playwright.PageReloadOptions) (playwright.Response, error)
 	BringToFront() error
+	// pressKey sends one key or one chord to the focused element of the page.
+	pressKey(key string) error
 }
 
 // frame is a document: the page's main frame or an iframe entered with selectFrame (R10).
 type frame interface {
 	locator(selector string) element
+	// getByRole, getByText, getByLabel and getByPlaceholder take a plain string, never a regexp or a selector: the value
+	// is matched as text. A nil name is no accessible-name filter.
+	getByRole(role playwright.AriaRole, name *string, exact bool) element
+	getByText(text string, exact bool) element
+	getByLabel(text string, exact bool) element
+	getByPlaceholder(text string, exact bool) element
 	Content() (string, error)
 	Evaluate(expression string, arg ...any) (any, error)
 	WaitForLoadState(options ...playwright.FrameWaitForLoadStateOptions) error
@@ -75,6 +83,10 @@ type element interface {
 	Click(options ...playwright.LocatorClickOptions) error
 	PressSequentially(text string, options ...playwright.LocatorPressSequentiallyOptions) error
 	Press(key string, options ...playwright.LocatorPressOptions) error
+	WaitFor(options ...playwright.LocatorWaitForOptions) error
+	Hover(options ...playwright.LocatorHoverOptions) error
+	// dragTo drops this element on target, which comes from the same frame.
+	dragTo(target element, options ...playwright.LocatorDragToOptions) error
 	SelectOption(values playwright.SelectOptionValues, options ...playwright.LocatorSelectOptionOptions) ([]string, error)
 	SetInputFiles(files any, options ...playwright.LocatorSetInputFilesOptions) error
 	InnerText(options ...playwright.LocatorInnerTextOptions) (string, error)

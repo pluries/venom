@@ -5,6 +5,9 @@ name: Site languages in a browser
 #   python -m http.server 8000 --directory build/site   (any server of the build folder)
 #   venom run tests/site/site-languages.yml --var appUrl=http://localhost:8000
 # Check it without a browser: venom recipe check --specs-dir docs/specs tests/site/site-languages.yml
+# The search cases use the role and the name a reader sees (the search button, the field's placeholder, the hits as
+# options) and wait for the first hit. The language cases keep CSS: the links sit in a closed menu, which a role locator
+# does not see, and nothing else names the menu or its marked entry.
 # The width cases read scrollWidth and clientWidth through `execute`: a page that scrolls sideways at 320 px makes the
 # difference positive and the case fail. The negative control of those cases is a copy that expects 1.
 vars:
@@ -205,15 +208,31 @@ testcases:
   - type: web
     action:
       click:
-        find: .search-button
+        find:
+          locator: ROLE
+          selector: button
+          name: 搜索文档
+          exact: true
   - type: web
     action:
       fill:
-      - find: .search-input
+      - find:
+          locator: PLACEHOLDER
+          selector: 搜索文档
         text: "步"
   - type: web
     action:
-      find: .search-hit
+      waitFor:
+        find:
+          locator: ROLE
+          selector: option
+        state: visible
+        syncTimeout: 10
+  - type: web
+    action:
+      find:
+        locator: ROLE
+        selector: option
     assertions:
     - result.find ShouldBeGreaterThan 0
 
@@ -226,15 +245,31 @@ testcases:
   - type: web
     action:
       click:
-        find: .search-button
+        find:
+          locator: ROLE
+          selector: button
+          name: 搜索文档
+          exact: true
   - type: web
     action:
       fill:
-      - find: .search-input
+      - find:
+          locator: PLACEHOLDER
+          selector: 搜索文档
         text: "步骤"
   - type: web
     action:
-      find: .search-hit
+      waitFor:
+        find:
+          locator: ROLE
+          selector: option
+        state: visible
+        syncTimeout: 10
+  - type: web
+    action:
+      find:
+        locator: ROLE
+        selector: option
     assertions:
     - result.find ShouldBeGreaterThan 0
 
@@ -247,14 +282,30 @@ testcases:
   - type: web
     action:
       click:
-        find: .search-button
+        find:
+          locator: ROLE
+          selector: button
+          name: 搜索文档
+          exact: true
   - type: web
     action:
       fill:
-      - find: .search-input
+      - find:
+          locator: PLACEHOLDER
+          selector: 搜索文档
         text: "步骤　断言"
   - type: web
     action:
-      find: .search-hit
+      waitFor:
+        find:
+          locator: ROLE
+          selector: option
+        state: visible
+        syncTimeout: 10
+  - type: web
+    action:
+      find:
+        locator: ROLE
+        selector: option
     assertions:
     - result.find ShouldBeGreaterThan 0

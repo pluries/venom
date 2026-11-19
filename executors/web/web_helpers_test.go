@@ -576,6 +576,9 @@ func (p *fakePage) Reload(...playwright.PageReloadOptions) (playwright.Response,
 
 func (p *fakePage) BringToFront() error { return p.pw.call("BringToFront "+p.name, nil) }
 
+// pressKey is logged as "PressKey <page> <key>".
+func (p *fakePage) pressKey(key string) error { return p.pw.call("PressKey "+p.name+" "+key, nil) }
+
 // fakeFrame is a page's main frame, or an iframe named by the selector that found it.
 type fakeFrame struct {
 	pw     *fakePW
@@ -584,11 +587,49 @@ type fakeFrame struct {
 }
 
 func (f *fakeFrame) locator(selector string) element {
-	name := selector
+	return f.named(selector)
+}
+
+// named is the element called name in this frame; in an iframe its name starts with the iframe's.
+func (f *fakeFrame) named(name string) element {
 	if f.iframe {
-		name = f.name + " >> " + selector
+		name = f.name + " >> " + name
 	}
 	return &fakeElement{pw: f.pw, frame: f, name: name}
+}
+
+// The getBy* calls name their element by what the executor sent, as "getByRole(button,"Add",exact=false)" or
+// "getByText("Total",exact=true)": the text is quoted whole, so a test sees exactly what reached the seam. They never
+// start with an engine prefix such as css=: a value that became a selector would show.
+
+func (f *fakeFrame) getByRole(role playwright.AriaRole, name *string, exact bool) element {
+	return f.named(fakeRoleName(role, name, exact))
+}
+
+func (f *fakeFrame) getByText(text string, exact bool) element {
+	return f.named(fakeTextName("getByText", text, exact))
+}
+
+func (f *fakeFrame) getByLabel(text string, exact bool) element {
+	return f.named(fakeTextName("getByLabel", text, exact))
+}
+
+func (f *fakeFrame) getByPlaceholder(text string, exact bool) element {
+	return f.named(fakeTextName("getByPlaceholder", text, exact))
+}
+
+// fakeRoleName is the name of the element getByRole returns; a nil name logs as <nil>.
+func fakeRoleName(role playwright.AriaRole, name *string, exact bool) string {
+	quoted := "<nil>"
+	if name != nil {
+		quoted = strconv.Quote(*name)
+	}
+	return fmt.Sprintf("getByRole(%s,%s,exact=%t)", role, quoted, exact)
+}
+
+// fakeTextName is the name of the element getByText, getByLabel or getByPlaceholder (call) returns.
+func fakeTextName(call, text string, exact bool) string {
+	return fmt.Sprintf("%s(%s,exact=%t)", call, strconv.Quote(text), exact)
 }
 
 // Content is held while the frame navigates, as Evaluate is.
@@ -683,6 +724,41 @@ func (e *fakeElement) PressSequentially(text string, o ...playwright.LocatorPres
 
 func (e *fakeElement) Press(key string, o ...playwright.LocatorPressOptions) error {
 	return e.call("Press "+e.target()+" "+key, o[0].Timeout)
+}
+
+// WaitFor is logged as "WaitFor <target> state=<state|unset>[ timeout=ms]".
+func (e *fakeElement) WaitFor(o ...playwright.LocatorWaitForOptions) error {
+	var opts playwright.LocatorWaitForOptions
+	if len(o) > 0 {
+		opts = o[0]
+	}
+	state := "unset"
+	if opts.State != nil {
+		state = string(*opts.State)
+	}
+	return e.call("WaitFor "+e.target()+" state="+state, opts.Timeout)
+}
+
+// Hover is logged as "Hover <target>[ timeout=ms]".
+func (e *fakeElement) Hover(o ...playwright.LocatorHoverOptions) error {
+	var opts playwright.LocatorHoverOptions
+	if len(o) > 0 {
+		opts = o[0]
+	}
+	return e.call("Hover "+e.target(), opts.Timeout)
+}
+
+// dragTo is logged as "DragTo <target> -> <drop target>[ timeout=ms]".
+func (e *fakeElement) dragTo(target element, o ...playwright.LocatorDragToOptions) error {
+	var opts playwright.LocatorDragToOptions
+	if len(o) > 0 {
+		opts = o[0]
+	}
+	to, ok := target.(*fakeElement)
+	if !ok {
+		panic(fmt.Sprintf("dragTo: the target is a %T, not a *fakeElement", target))
+	}
+	return e.call("DragTo "+e.target()+" -> "+to.target(), opts.Timeout)
 }
 
 func (e *fakeElement) SelectOption(values playwright.SelectOptionValues, o ...playwright.LocatorSelectOptionOptions) ([]string, error) {

@@ -2,9 +2,9 @@
 translates: recipes
 title: Recettes
 description: Écrivez des tests de navigateur et de mobile sous forme de recettes qu'un contrôle et un contrôle négatif peuvent prouver.
-fingerprint: 3dd31333d7ad4d4487d1c297fdc7e02dc69595aee1619af22617d3bfb867d5d5
+fingerprint: 82005e3722eb38017980efc2b70ccd792894888e52d1846d5c7918662e03d91a
 drafted_by: claude
-drafted_on: 2026-11-18
+drafted_on: 2026-11-19
 status: machine-drafted
 ---
 Une recette est une suite de tests venom qui pilote une page web ou une application mobile. Cette page montre comment organiser les recettes, les nommer, prouver qu'elles testent quelque chose, et garder les secrets et les résultats hors des mauvais endroits. Il vous faut venom et, pour les recettes web, un navigateur installé par Playwright. Les pages du [executor web](web.html) et du [executor mobile](mobile.html) listent chaque action.
@@ -52,13 +52,26 @@ Pour voir quels scénarios une recette prouve, ajoutez `--coverage` avec l'ident
 
 ## Sélecteurs {#selectors}
 
-Une étape `find`, `click` ou `fill` prend un sélecteur. Utilisez du CSS ou du XPath. Préférez un attribut de test stable, comme `data-test` :
+Une étape `find`, `click` ou `fill` prend un sélecteur. La clé `locator` indique comment le lire : `CSS`, `XPATH`, `ROLE`, `TEXT`, `LABEL`, `PLACEHOLDER` ou `TESTID`.
+
+Préférez les localisateurs ROLE et TESTID à un chemin CSS. `ROLE` trouve un élément par ce qu'il est et par son nom, comme le voit un utilisateur. `TESTID` le trouve par un identifiant de test que la page définit uniquement pour les tests :
 
 ```
-find: '[data-test="add-button"]'
+find:
+  locator: ROLE
+  selector: button
+  name: Add item
 ```
 
-Les identifiants et les noms de classe changent quand quelqu'un modifie le style de la page. Un attribut `data-test` n'existe que pour que les tests trouvent l'élément. Si l'application n'en a pas, demandez aux développeurs d'en ajouter avant d'écrire la recette.
+```
+find:
+  locator: TESTID
+  selector: add-button
+```
+
+Les identifiants et les noms de classe changent quand quelqu'un modifie le style de la page. Un rôle et un nom, ou un identifiant de test, restent. Si la page n'a ni rôle ni identifiant de test exploitable, demandez aux développeurs d'en ajouter avant d'écrire la recette. Ne revenez à CSS ou XPath que si rien d'autre ne correspond.
+
+`TESTID` lit l'attribut `data-testid`. Beaucoup de pages utilisent `data-test` à la place, et `TESTID` ne trouve alors rien. Définissez une fois dans la suite la variable `web.testIdAttribute` avec le nom que la page utilise, par exemple `testIdAttribute: data-test`. La page de l'[executor web](web.html) liste chaque localisateur et ses règles.
 
 `find` n'attend pas. Il compte les éléments qui existent maintenant. Quand la page charge des données après le premier affichage, attendez d'abord avec `wait`, ou utilisez un `click` ou un `fill`, qui attendent leur élément. Dans une étape mobile, définissez exactement un localisateur, comme `accessibilityId`.
 
@@ -80,11 +93,11 @@ Le contrôle est statique. Il ne peut pas lire l'intérieur d'un script `execute
 
 ## Ce que les executors ne savent pas faire {#what-the-executors-cannot-do}
 
-L'executor web n'a pas d'étape pour le survol, le glisser-déposer ou un raccourci clavier, et `find` ne peut pas lire un nombre comme une largeur de défilement. L'action `execute` lance un script dans la page et renvoie une valeur, sur laquelle vous pouvez faire une assertion. Cet exemple lit de combien la page défile sur le côté et combien d'éléments elle liste :
+L'executor web a les étapes `hover`, `dragAndDrop` et `press` pour une touche ou un enchaînement tel que `Control+A`, et `waitFor` pour un élément qui apparaît ou disparaît. `find` ne peut pas lire un nombre comme une largeur de défilement. L'action `execute` lance un script dans la page et renvoie une valeur, sur laquelle vous pouvez faire une assertion. Cet exemple lit de combien la page défile sur le côté et combien d'éléments elle liste :
 
 {{include site/examples/recipes/web-execute.yml yaml}}
 
-Si `execute` ne suffit pas, notez le manque et n'écrivez pas de recette pour ce scénario. Ne mettez pas toutes les assertions d'un cas de test sur le résultat d'un seul script sans contrôle négatif : le contrôle ne peut pas lire le script.
+Un `waitFor` avec l'état `hidden` ou `detached` passe aussitôt sur un sélecteur mal saisi : vérifiez donc d'abord le sélecteur. `press` envoie des touches, pas un texte, et un vidage ou une trace contient ce que `fill` et `press` ont saisi. Si `execute` ne suffit pas, notez le manque et n'écrivez pas de recette pour ce scénario. Ne mettez pas toutes les assertions d'un cas de test sur le résultat d'un seul script sans contrôle négatif : le contrôle ne peut pas lire le script.
 
 Une recette mobile a besoin d'un serveur Appium et d'un appareil ou d'un émulateur. Elle ne s'exécute pas sans eux. Celle-ci porte l'étiquette `# needs: device` sur sa première ligne, de sorte que les tests du site l'ignorent là où aucun appareil n'existe :
 

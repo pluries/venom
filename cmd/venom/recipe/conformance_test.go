@@ -71,11 +71,41 @@ func webStepKeyProblems(step map[string]any) []string {
 	problems := prefixKeys("step key ", unknownKeys(step, allowed))
 	if action, ok := step["action"].(map[string]any); ok {
 		problems = append(problems, prefixKeys("action key ", unknownKeys(action, yamlFieldNames(reflect.TypeOf(web.Action{}))))...)
+		problems = append(problems, prefixKeys("find key ", findKeyProblems(action))...)
 	}
 	if mocks, ok := step["mock"].([]any); ok {
 		problems = append(problems, mockKeyProblems(mocks)...)
 	}
 	return problems
+}
+
+// findKeys are the keys of a find element map: the selector and its locator kind, and the two keys of the role, text,
+// label and placeholder kinds (spec 015, US1).
+var findKeys = map[string]bool{"selector": true, "locator": true, "name": true, "exact": true}
+
+// findKeyProblems returns the keys of every element map (the value of find, from or to, at any depth under an action)
+// that are not in findKeys.
+func findKeyProblems(node any) []string {
+	var problems []string
+	switch n := node.(type) {
+	case map[string]any:
+		for _, k := range yamlKeys(n) {
+			problems = append(problems, elementKeyProblems(k, n[k])...)
+		}
+	case []any:
+		for _, item := range n {
+			problems = append(problems, findKeyProblems(item)...)
+		}
+	}
+	return problems
+}
+
+func elementKeyProblems(key string, value any) []string {
+	var problems []string
+	if element, ok := value.(map[string]any); ok && (key == "find" || key == "from" || key == "to") {
+		problems = unknownKeys(element, findKeys)
+	}
+	return append(problems, findKeyProblems(value)...)
 }
 
 func prefixKeys(prefix string, keys []string) []string {
@@ -499,4 +529,77 @@ func hasRule(findings []recipecheck.Finding, rule string) bool {
 		}
 	}
 	return false
+}
+
+// webActionStep is a decoded web step whose action holds every new action of spec 015 and the new find keys.
+func webActionStep() map[string]any {
+	element := map[string]any{"locator": "ROLE", "selector": "button", "name": "Add", "exact": true}
+	return map[string]any{
+		"type": "web",
+		"action": map[string]any{
+			"waitFor":     map[string]any{"find": element, "state": "visible", "syncTimeout": 5},
+			"hover":       map[string]any{"find": element},
+			"dragAndDrop": map[string]any{"from": element, "to": map[string]any{"locator": "TESTID", "selector": "list"}},
+			"press":       map[string]any{"key": "Control+A", "find": element},
+		},
+	}
+}
+
+// US4-AS3, FR-013: the helper accepts the new action keys and the new find keys (it reads the executor's fields).
+func TestWebStepKeyProblemsAcceptsTheNewActionsAndFindKeys(t *testing.T) {
+	assert.Empty(t, webStepKeyProblems(webActionStep()))
+}
+
+// US4-AS3: the helper still rejects a misspelt new action and a misspelt find key.
+func TestWebStepKeyProblemsRejectsAMisspeltNewActionOrFindKey(t *testing.T) {
+	element := map[string]any{"locator": "ROLE", "selectr": "button", "nam": "Add"}
+	step := map[string]any{
+		"type": "web",
+		"action": map[string]any{
+			"waitfor":     map[string]any{"find": element},
+			"hoover":      map[string]any{"find": "a"},
+			"dragAndDrop": map[string]any{"from": map[string]any{"selector": "a", "exactly": true}, "to": "b"},
+			"fill":        []any{map[string]any{"find": map[string]any{"selector": "i", "locater": "CSS"}, "text": "x"}},
+		},
+	}
+
+	assert.ElementsMatch(t, []string{
+		"action key waitfor", "action key hoover",
+		"find key nam", "find key selectr", "find key exactly", "find key locater",
+	}, webStepKeyProblems(step))
+}
+
+// actionsFixture is the recipe fixture of spec 015: the new locators and actions in one suite.
+func actionsFixture(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(fixturesDir(t), "actions", "page.yml")
+}
+
+// US4-AS3, FR-013: the fixture uses every new locator kind and every new action, so that the next test proves something.
+func TestActionsFixtureUsesEveryNewLocatorAndAction(t *testing.T) {
+	text, err := os.ReadFile(actionsFixture(t))
+	require.NoError(t, err)
+
+	for _, name := range []string{"waitFor:", "hover:", "dragAndDrop:", "press:", "locator: ROLE", "locator: TEXT",
+		"locator: PLACEHOLDER", "locator: TESTID", "testIdAttribute:"} {
+		assert.Contains(t, string(text), name)
+	}
+}
+
+// US4-AS3, FR-013: a recipe that uses the new locators and actions passes `venom recipe check` with no finding, its
+// keys are fields of the executor, and venom run's own loading accepts it.
+func TestActionsFixturePassesTheCheckAndTheLoading(t *testing.T) {
+	path := actionsFixture(t)
+	require.True(t, fileExists(path), path)
+
+	report, err := recipecheck.Check([]string{path}, recipecheck.Options{SpecsDir: repoSpecsDir(t)})
+	require.NoError(t, err)
+	assert.Empty(t, report.Findings)
+	steps := webSteps(t, path)
+	require.NotEmpty(t, steps)
+	for _, step := range steps {
+		assert.Empty(t, webStepKeyProblems(step), path)
+	}
+	parsed, parseErr := acceptedByParse(t, []string{path}, variablesUsedBy(t, []string{path}))
+	assert.True(t, parsed, "venom run's loading said: %v", parseErr)
 }

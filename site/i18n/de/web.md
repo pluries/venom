@@ -2,9 +2,9 @@
 translates: web
 title: Web
 description: Den Web-executor in einer venom-Test-Suite verwenden.
-fingerprint: 841e8ee00f470e50ad60416a4c8b072458dd7b33e432bb145851d952a4649966
+fingerprint: d700bc6151e18429c9339fb06ffe6bc6b56b451abd92c6c1328ee3c6cbec08f8
 drafted_by: claude
-drafted_on: 2026-11-16
+drafted_on: 2026-11-19
 status: machine-drafted
 ---
 # Venom - Executor Web {#venom---executor-web}
@@ -63,6 +63,8 @@ Sie können Parameter definieren, um den Browser zu konfigurieren, der während 
 * binaryPath: Browser-Programm, das anstelle des Browsers von Playwright verwendet wird (nur `chrome`)
 * trace (Standard: `false`): einen Playwright-Trace jedes fehlgeschlagenen Schritts in `page.trace.zip` speichern. Siehe
   [Fehlerdiagnose](#failure-diagnostics)
+* testIdAttribute (Standard: `data-testid`): das Attribut, das ein Locator `TESTID` liest (siehe [Locators](#locators)). Setzen Sie es
+  einmal für die Suite, für eine Seite, die ihre Elemente mit `data-test` oder einem anderen Namen markiert. Siehe [Fallstricke](#traps). Der Name muss zu `^[A-Za-z_][A-Za-z0-9_:.-]*$` passen: Jeder andere Wert lässt das Setup scheitern, bevor der Browser startet
 
 Chromium läuft mit eingeschalteter Sandbox, wie unter chromedriver. Braucht eine Suite sie ausgeschaltet (etwa in einem Container, der als
 root läuft), übergibt sie `--no-sandbox` in `args`. Ein Host, der unprivilegierte User-Namespaces einschränkt, wie es natives
@@ -82,10 +84,11 @@ Weiterhin akzeptiert, aber **mit einer Warnung ignoriert** — sie haben in Play
 ## Aktion {#action}
 Aktionen erlauben es Ihnen, den Browser zu bedienen
 
-Eine Aktion auf einem Element (`click`, `fill`, `select`, `uploadFile`, `selectFrame`) wartet, bis das Element bereit ist,
-höchstens bis zu seinem `syncTimeout` oder 30 Sekunden. `find` wartet nie: Es zählt die Elemente, die jetzt vorhanden sind, sodass
-`result.find ShouldEqual 0` schnell bleibt. Nach einer Aktion, die eine Seite laden kann (`click`, `fill`, `select`,
-`uploadFile`, `execute`, eine Antwort auf ein Popup), wartet der Schritt, bis die Seite fertig geladen ist, bevor er
+Eine Aktion auf einem Element (`click`, `fill`, `select`, `uploadFile`, `selectFrame`, `hover`, `dragAndDrop` und `press` mit `find`) wartet, bis das Element bereit ist,
+höchstens bis zu seinem `syncTimeout` oder 30 Sekunden. `waitFor` wartet, bis das Element seinen `state` erreicht, innerhalb seines `syncTimeout`. `find` wartet nie: Es zählt die Elemente, die jetzt vorhanden sind, sodass
+`result.find ShouldEqual 0` schnell bleibt. `find`, `waitFor`, `hover`, `dragAndDrop` und `press` warten, wie die Aktionen oben,
+auf eine bereits laufende Navigation, bevor sie ausgeführt werden. Nach einer Aktion, die eine Seite laden kann (`click`, `fill`, `select`,
+`uploadFile`, `execute`, `waitFor`, `hover`, `dragAndDrop`, `press`, eine Antwort auf ein Popup), wartet der Schritt, bis die Seite fertig geladen ist, bevor er
 `result.title` und `result.url` liest. Dazu gehört eine Navigation, die die Seite von selbst startet, aus einem Skript
 (`location.href = …`) oder von einem Timer ohne Verzögerung. Eine Navigation, die nicht innerhalb von `timeout` abgeschlossen wird, lässt den Schritt fehlschlagen,
 und die folgenden Schritte ebenfalls, bis ein `navigate` sie ersetzt. Solange die Seite navigiert, wird kein `page.dump.html` geschrieben.
@@ -127,7 +130,7 @@ Ein Element über einen Selektor suchen
 
 #### Eingabe {#input-1}
 * Selector: Ausdruck, mit dem das Web-Element identifiziert wird
-* Locator: Locator, mit dem das Element gesucht wird (CSS oder XPATH)
+* Locator: Locator, mit dem das Element gesucht wird: `CSS` oder `XPATH`, oder eine der Arten unter [Locators](#locators)
 
 #### Ausgabe {#output}
 * result.find: liefert die Anzahl der identifizierten Objekte
@@ -152,15 +155,77 @@ Ein Element über einen Selektor suchen
     - result.value ShouldEqual Recherche Google
 ```
 
+### Locators {#locators}
+Ein `find`-Element nennt seine Art in `locator`. Neben `CSS` und `XPATH` entsprechen fünf Arten dem, was ein Benutzer sieht, oder dem,
+was die Seite für Tests markiert. Bevorzugen Sie sie gegenüber einem CSS-Pfad: Sie überstehen eine Neugestaltung der Seite.
+
+#### Eingabe {#input-2}
+* `locator: ROLE`: `selector` ist eine ARIA-Rolle (`button`, `link`, `textbox`, `checkbox`, `heading`, `listitem`, ...).
+  `name` ist optional und filtert nach dem zugänglichen Namen des Elements; ein leerer `name` bedeutet keinen Namensfilter
+* `locator: TEXT`: `selector` ist der Text des Elements
+* `locator: LABEL`: `selector` ist der Text der Beschriftung eines Formularfelds
+* `locator: PLACEHOLDER`: `selector` ist der Platzhaltertext (Placeholder) eines Felds
+* `locator: TESTID`: `selector` ist die Test-ID. Gelesen wird das Attribut `data-testid` oder das Attribut, das die Variable
+  `testIdAttribute` festlegt. Es muss den ganzen Wert treffen und nimmt kein `exact`
+* `exact` (`true` oder `false`, Standard `false`): bei `ROLE` gilt es für `name`, bei `TEXT`, `LABEL` und `PLACEHOLDER`
+  für `selector`
+
+Standardmäßig treffen `TEXT`, `LABEL` und ein `ROLE`-Name ohne Beachtung der Groß- und Kleinschreibung, als Teilzeichenkette, und
+ignorieren überzählige Leerzeichen: Der Text `add` trifft die Schaltfläche `Add item`. Mit `exact: true` muss der ganze Text
+übereinstimmen, mit der Schreibweise wie angegeben. `PLACEHOLDER` trifft das Attribut so, wie es geschrieben ist.
+
+Ein Wert wird immer als reiner Text gelesen. Er ist nie ein CSS-Selektor, ein Engine-Präfix oder ein regulärer Ausdruck. Ein Schritt,
+der mehrere Elemente findet, verwendet das erste.
+
+#### Beispiel {#example-2}
+```yaml
+  - type: web
+    action:
+      click:
+        find:
+          locator: ROLE
+          selector: button
+          name: Add item
+          exact: true
+
+  - type: web
+    action:
+      fill:
+      - find:
+          locator: LABEL
+          selector: Email
+        text: user@example.com
+
+  - type: web
+    action:
+      find:
+        locator: TESTID
+        selector: cart-count
+    assertions:
+    - result.find ShouldEqual 1
+```
+
+#### Fehler {#errors}
+Ein Schritt mit einem falschen `find` schlägt fehl, bevor er handelt, und die Meldung nennt den Schlüssel:
+* ein `locator`, der keine der sieben Arten ist: `invalid find element locator 'X' (must be CSS, XPATH, ROLE, TEXT, LABEL, PLACEHOLDER or TESTID)`
+* ein Selektor für `ROLE`, der keine ARIA-Rolle ist: Die Meldung listet die Rollen auf
+* ein leerer `selector` bei `TEXT`, `LABEL`, `PLACEHOLDER` oder `TESTID`
+* ein `TESTID`-Selektor, der ein NUL-Zeichen enthält
+* `name` bei einer anderen Art als `ROLE` oder `exact` bei `TESTID`: Die Meldung sagt, welche Arten es annehmen
+* `name`, das keine Zeichenkette ist, oder `exact`, das weder `true` noch `false` ist
+* jeder andere Schlüssel: `invalid find element key 'X' for a ROLE locator (must be locator, selector, name, exact)`
+
+Diese Prüfungen gelten für die fünf Arten dieses Abschnitts. Die zusätzlichen Schlüssel eines `CSS`- oder `XPATH`-Elements werden ignoriert, wie sie es immer wurden.
+
 ### Click {#click}
 Auf ein Element über einen Selektor klicken
 
-#### Eingabe {#input-2}
+#### Eingabe {#input-3}
 * Find: Element, das gesucht wird (weitere Informationen im Abschnitt Find)
 * Wait: Wartezeit nach dem Klick (in Sekunden)
 * SyncTimeout: maximale Zeit in Sekunden, die auf die Bereitschaft des Elements gewartet wird (vorhanden, sichtbar, aktiviert, unbewegt, nicht verdeckt). Standard: `30`
 
-#### Beispiel {#example-2}
+#### Beispiel {#example-3}
 ```yaml
   - type: web
     action:
@@ -174,14 +239,14 @@ Auf ein Element über einen Selektor klicken
 Ein Element (input oder textarea) mit einem Text füllen. Der Text wird hinter den aktuellen Inhalt des Felds getippt, wie es WebDriver
 tat; er ersetzt ihn nicht
 
-#### Eingabe {#input-3}
+#### Eingabe {#input-4}
 Array strukturierter Eingaben:
 * Find: Element, das gesucht wird (weitere Informationen im Abschnitt Find)
 * Text: den Wert des Elements mit Text aktualisieren
 * Key: den Wert des Elements mit einer Taste aktualisieren
 * SyncTimeout: maximale Zeit in Sekunden, die auf die Bereitschaft des Elements gewartet wird (vorhanden, sichtbar, aktiviert, unbewegt, nicht verdeckt). Standard: `30`
 
-#### Beispiel {#example-3}
+#### Beispiel {#example-4}
 ```yaml
   - type: web
     action:
@@ -195,13 +260,13 @@ Array strukturierter Eingaben:
 ### Select {#select}
 Eine Option eines Web-Elements auswählen
 
-#### Eingabe {#input-4}
+#### Eingabe {#input-5}
 * Find: Element, das gesucht wird (weitere Informationen im Abschnitt Find)
 * Text: auszuwählende Option
 * Wait: Wartezeit nach dem Klick (in Sekunden)
 * SyncTimeout: maximale Zeit in Sekunden, die auf die Bereitschaft des Elements gewartet wird (vorhanden, sichtbar, aktiviert, unbewegt, nicht verdeckt). Standard: `30`
 
-#### Beispiel {#example-4}
+#### Beispiel {#example-5}
 ```yaml
   - type: web
     action:
@@ -215,13 +280,13 @@ Eine Option eines Web-Elements auswählen
 ### Upload file {#upload-file}
 Eine Datei auf ein Web-Element hochladen
 
-#### Eingabe {#input-5}
+#### Eingabe {#input-6}
 * Find: Element, das gesucht wird (weitere Informationen im Abschnitt Find)
 * Files: String-Array, das die hochzuladenden Dateien festlegt
 * Wait: Wartezeit nach dem Klick (in Sekunden)
 * SyncTimeout: maximale Zeit in Sekunden, die auf die Bereitschaft des Elements gewartet wird (vorhanden, sichtbar, aktiviert, unbewegt, nicht verdeckt). Standard: `30`
 
-#### Beispiel {#example-5}
+#### Beispiel {#example-6}
 ```yaml
   - type: web
     action:
@@ -237,21 +302,162 @@ Eine Datei auf ein Web-Element hochladen
 Zeit abwarten
 Ein ganzzahliger Wert legt die Anzahl der Sekunden fest, die gewartet wird
 
-#### Beispiel {#example-6}
+#### Beispiel {#example-7}
 ```yaml
   - type: web
     action:
       wait: 1
 ```
 
+### Wait for {#wait-for}
+Warten, bis ein Element einen Zustand erreicht. Verwenden Sie es, wenn die Seite nach dem ersten Zeichnen Daten lädt oder ein Panel öffnet.
+
+#### Eingabe {#input-7}
+* Find: Element, auf das gewartet wird (mehr dazu unter find und [Locators](#locators))
+* State: `visible` (Standard, auch wenn `state` leer ist), `hidden`, `attached` oder `detached`
+  * `visible`: das Element existiert und wird angezeigt
+  * `hidden`: das Element fehlt oder wird nicht angezeigt
+  * `attached`: das Element existiert in der Seite, angezeigt oder nicht
+  * `detached`: das Element ist nicht in der Seite
+* SyncTimeout: maximale Zeit in Sekunden, die auf den Zustand gewartet wird. Standard: `30`. Ein Wert von `0` oder weniger bedeutet `30`
+
+Bei `visible` wartet der Schritt auf den ersten Treffer.
+
+Jede Prüfung betrachtet das erste Element, das in diesem Moment trifft. Wird dieses Element entfernt und trifft noch ein anderes, wartet der Schritt mit dem nächsten weiter. `detached` wartet, bis kein Element mehr trifft: Wird das erste Element entfernt, wird das nächste zum ersten, daher wartet der Schritt bei mehreren Treffern, bis keiner mehr übrig ist. `hidden` folgt dem ersten Element, das trifft, und das bleibt dasselbe Element, solange es existiert (ein per CSS ausgeblendetes Element trifft weiterhin), daher kann `hidden` bei mehreren Treffern enden, während die anderen noch angezeigt werden. Um zu warten, bis jedes davon ausgeblendet ist, warten Sie auf `detached` oder geben Sie jedem Element seinen eigenen Locator.
+
+#### Beispiel {#example-8}
+```yaml
+  - type: web
+    action:
+      waitFor:
+        find:
+          locator: TEXT
+          selector: Order saved
+        state: visible
+        syncTimeout: 10
+
+  - type: web
+    action:
+      waitFor:
+        find:
+          locator: TESTID
+          selector: spinner
+        state: hidden
+```
+
+#### Fehler {#errors-1}
+* `waitFor: the field 'find' is required (allowed: find, state, syncTimeout)`
+* `waitFor: invalid 'state' X (allowed: visible, hidden, attached, detached)`: Der Zustand unterscheidet Groß- und Kleinschreibung
+* ein anderes Feld als `find`, `state` und `syncTimeout`: `waitFor: unknown field 'X' (allowed: find, state, syncTimeout)`
+* der Zustand wird nicht rechtzeitig erreicht: `waitFor: the element ROLE "button" name "Add" did not become visible within 30s`, gefolgt vom
+  Grund des Browsers
+
+### Hover {#hover}
+Den Zeiger auf ein Element bewegen, um ein Menü oder einen Tooltip zu öffnen, der beim Darüberfahren erscheint. Der Schritt wartet, bis das Element
+bereit ist, wie es ein Klick tut.
+
+#### Eingabe {#input-8}
+* Find: Element, über das gefahren wird (mehr dazu unter find und [Locators](#locators)). Der erste Treffer wird verwendet
+* SyncTimeout: maximale Zeit in Sekunden, die gewartet wird, bis das Element bereit ist. Standard: `30`
+
+#### Beispiel {#example-9}
+```yaml
+  - type: web
+    action:
+      hover:
+        find:
+          locator: ROLE
+          selector: link
+          name: Products
+
+  - type: web
+    action:
+      waitFor:
+        find:
+          locator: ROLE
+          selector: menuitem
+          name: Shoes
+```
+
+#### Fehler {#errors-2}
+* `hover: the field 'find' is required (allowed: find, syncTimeout)`
+* ein anderes Feld als `find` und `syncTimeout`: `hover: unknown field 'X' (allowed: find, syncTimeout)`
+* das Element ist nicht rechtzeitig bereit: `hover: ROLE "link" name "Products"`, gefolgt vom Grund des Browsers
+
+### Ziehen und Ablegen {#drag-and-drop}
+Ein Element ziehen und auf einem anderen ablegen. Der Schritt wartet, bis beide bereit sind.
+
+#### Eingabe {#input-9}
+* From: Element, das gezogen wird (mehr dazu unter find und [Locators](#locators)). Der erste Treffer wird verwendet
+* To: Element, auf dem abgelegt wird. Der erste Treffer wird verwendet
+* SyncTimeout: maximale Zeit in Sekunden, die gewartet wird, bis das Ziehen abgeschlossen ist. Standard: `30`
+
+#### Beispiel {#example-10}
+```yaml
+  - type: web
+    action:
+      dragAndDrop:
+        from:
+          locator: TEXT
+          selector: Task A
+          exact: true
+        to:
+          locator: TESTID
+          selector: column-done
+```
+
+#### Fehler {#errors-3}
+* `dragAndDrop: the field 'from' is required (allowed: from, to, syncTimeout)`, und ebenso für `to`
+* ein anderes Feld als `from`, `to` und `syncTimeout`: `dragAndDrop: unknown field 'X' (allowed: from, to, syncTimeout)`
+* das Ablegen schlägt fehl oder läuft in die Zeitüberschreitung: `dragAndDrop: TEXT "Task A" exact to TESTID "column-done"`, gefolgt vom Grund des Browsers
+
+### Press {#press}
+Eine Taste oder eine Tastenkombination drücken, etwa `Enter`, `Escape`, `Tab` oder `Control+A`. Mit `find` geht die Taste an dieses Element.
+Ohne ihn geht sie an das Element, das den Fokus hat. `press` nimmt eine Taste oder eine Tastenkombination, keinen Text: Um einen
+Text einzugeben, verwenden Sie `fill`.
+
+#### Eingabe {#input-10}
+* Key: die Taste oder die Tastenkombination (erforderlich). Groß- und Kleinschreibung zählt. Verwenden Sie einen Playwright-Tastennamen (`Enter`,
+  `ArrowDown`, `F5`, `Backspace`) oder eine Taste aus einem Zeichen (`a`, `7`). Eine Kombination verbindet Tasten mit `+`:
+  `Control+A`, `Shift+Tab`. Auch die WebDriver-Namen, die `fill` für `key` akzeptiert (`ENTER`, `ESCAPE`, `ARROW_DOWN`), funktionieren,
+  als einzelne Taste. Eine Kombination nimmt nur Playwright-Namen. `press` akzeptiert die Tastennamen einer festen Liste; eine seltene Playwright-Taste, die nicht darin steht
+  (`ShiftLeft`, `ControlLeft`, `CapsLock`, `ContextMenu`, `NumLock`, `ScrollLock`, `PrintScreen`, `AltGraph`, `F13` und höher), wird mit einer Meldung abgelehnt, die die Taste nennt, und es wird nie eine falsche Taste gesendet. Eine Taste aus einem einzelnen Zeichen wird immer akzeptiert
+* Find: Element, an das die Taste geschickt wird (mehr dazu unter find und [Locators](#locators)). Optional. Der erste Treffer wird verwendet
+* SyncTimeout: maximale Zeit in Sekunden, die gewartet wird, bis das Element bereit ist. Standard: `30`. Ohne `find` ist kein Element beteiligt, es ist also kein Warten auf ein Element: Es verlängert nur das Limit des Tastenaufrufs selbst (60 Sekunden plus `syncTimeout`)
+
+#### Beispiel {#example-11}
+```yaml
+  - type: web
+    action:
+      press:
+        key: Enter
+        find:
+          locator: PLACEHOLDER
+          selector: Search
+
+  - type: web
+    action:
+      press:
+        key: Control+A
+```
+
+#### Fehler {#errors-4}
+* `press: the field 'key' is required (allowed: key, find, syncTimeout): press takes one key or one chord`
+* ein anderes Feld als `key`, `find` und `syncTimeout`: `press: unknown field 'X' (allowed: key, find, syncTimeout)`
+* ein `key`, der kein Text ist, eine YAML-Zahl wie `key: 5`: Die Meldung sagt, ihn in Anführungszeichen zu setzen (`key: "5"`)
+* eine unbekannte Taste oder ein Text: `press: invalid 'key' "X": not a key name; press takes one key or one chord`. Bei einer
+  Kombination nennt die Meldung den Teil, der fehlgeschlagen ist
+* eine WebDriver-Taste, für die Playwright keine Taste hat (`NULL`, `CANCEL`, `HELP`): Die Meldung sagt, dass es dafür kein
+  Playwright-Äquivalent gibt
+
 ### Select frame {#select-frame}
 Ein Frame auswählen, das in der aktuellen Seite vorhanden ist
 
-#### Eingabe {#input-6}
+#### Eingabe {#input-11}
 * Find: Frame, das gesucht wird (weitere Informationen im Abschnitt Find)
 * SyncTimeout: maximale Zeit in Sekunden, die auf die Bereitschaft des Elements gewartet wird (vorhanden, sichtbar, aktiviert, unbewegt, nicht verdeckt). Standard: `30`
 
-#### Beispiel {#example-7}
+#### Beispiel {#example-12}
 ```yaml
   - type: web
     action:
@@ -265,7 +471,7 @@ Ein Frame auswählen, das in der aktuellen Seite vorhanden ist
 Das Root-Frame auswählen, das in der aktuellen Seite vorhanden ist
 Ein boolescher Wert, der auf true gesetzt wird, um das Root-Frame auszuwählen
 
-#### Beispiel {#example-8}
+#### Beispiel {#example-13}
 ```yaml
   - type: web
     action:
@@ -277,7 +483,7 @@ Das nächste Fenster (den nächsten Tab) des Browsers auswählen, vom letzten zu
 bleibt der Schritt darauf
 Ein boolescher Wert, der auf true gesetzt wird, um das nächste Fenster auszuwählen
 
-#### Beispiel {#example-9}
+#### Beispiel {#example-14}
 ```yaml
   - type: web
     action:
@@ -288,7 +494,7 @@ Ein boolescher Wert, der auf true gesetzt wird, um das nächste Fenster auszuwä
 Zur vorherigen Seite zurückgehen
 Ein boolescher Wert, der auf true gesetzt wird, um zur vorherigen Seite zurückzugehen
 
-#### Beispiel {#example-10}
+#### Beispiel {#example-15}
 ```yaml
   - type: web
     action:
@@ -302,7 +508,7 @@ Ein boolescher Wert, der auf true gesetzt wird, um zur vorherigen Seite zurückz
 Zur nächsten Seite vorgehen
 Ein boolescher Wert, der auf true gesetzt wird, um zur nächsten Seite vorzugehen
 
-#### Beispiel {#example-11}
+#### Beispiel {#example-16}
 ```yaml
   - type: web
     action:
@@ -316,7 +522,7 @@ Ein boolescher Wert, der auf true gesetzt wird, um zur nächsten Seite vorzugehe
 Die Seite neu laden
 Ein boolescher Wert, der auf true gesetzt wird, um die Seite neu zu laden
 
-#### Beispiel {#example-12}
+#### Beispiel {#example-17}
 ```yaml
   - type: web
     action:
@@ -334,7 +540,7 @@ offen ist, sind `result.title` und `result.url` leer. Jede andere Aktion, währe
 mit `unexpected alert open` fehl, wie es WebDriver tat.
 Ein boolescher Wert, der auf true gesetzt wird, um den Popup-Dialog zu bestätigen
 
-#### Beispiel {#example-13}
+#### Beispiel {#example-18}
 ```yaml
   - type: web
     action:
@@ -345,7 +551,7 @@ Ein boolescher Wert, der auf true gesetzt wird, um den Popup-Dialog zu bestätig
 Den Popup-Dialog abbrechen
 Ein boolescher Wert, der auf true gesetzt wird, um den Popup-Dialog abzubrechen
 
-#### Beispiel {#example-14}
+#### Beispiel {#example-19}
 ```yaml
   - type: web
     action:
@@ -356,7 +562,7 @@ Ein boolescher Wert, der auf true gesetzt wird, um den Popup-Dialog abzubrechen
 JavaScript-Code ausführen. Der Befehl ist der Rumpf einer Funktion: `return` und `arguments[0]`, `arguments[1]`… funktionieren
 wie mit WebDriver
 
-#### Eingabe {#input-7}
+#### Eingabe {#input-12}
 * Command: auszuführender JavaScript-Code
 * Args: String-Array, das die JavaScript-Argumente festlegt
 
@@ -380,7 +586,7 @@ Ein Wert, der auf sich selbst verweist, etwa ein Objekt mit einer Eigenschaft, d
 Das gilt auch für eine URL, die der Browser akzeptiert und venom nicht lesen kann, etwa eine mit einem `%`, auf das keine zwei Hexadezimalziffern folgen
 (`https://a.test/x#50%off`). venom protokolliert eine Warnung, und der Schritt gelingt.
 
-#### Beispiel {#example-15}
+#### Beispiel {#example-20}
 ```yaml
   - type: web
     action:
@@ -406,7 +612,7 @@ Liste `mock:` hinzu, neben `action:`. Jeder Eintrag beantwortet jede Anfrage, de
 Anfrage erreicht nie das Netzwerk. Der Host muss nicht existieren: Ein Mock kann die Seite selbst ausliefern und danach
 die eigenen Aufrufe der Seite.
 
-#### Eingabe {#input-8}
+#### Eingabe {#input-13}
 Array strukturierter Eingaben:
 * Url: Muster der URLs, die beantwortet werden (erforderlich). `*` passt auf beliebige Zeichen außer `/`, `**` passt auf beliebige Zeichen,
   `{a,b}` passt auf `a` oder `b`. Das Muster passt auf die gesamte URL: `**/api/users` beantwortet
@@ -426,7 +632,7 @@ in einem Schritt vor dem Schritt, der das Popup öffnet.
 
 Eine Anfrage, die der Service Worker der Seite selbst beantwortet, erreicht den Mock nie.
 
-#### Beispiel {#example-16}
+#### Beispiel {#example-21}
 ```yaml
   - type: web
     mock:
@@ -473,7 +679,16 @@ Der Trace enthält alles, was der Schritt gesehen und getippt hat, **einschließ
 `page.dump.html`. Veröffentlichen Sie ihn nicht als Build-Artefakt und committen Sie ihn nicht. Tracing
 verlangsamt außerdem jeden Schritt, bei einer einfachen Seite um etwa 20 ms: Schalten Sie es ein, solange Sie einen Fehler untersuchen.
 
-## Beispiel {#example-17}
+## Fallstricke {#traps}
+* Ein falsch geschriebener Selektor besteht `waitFor` mit dem Zustand `hidden` oder `detached` sofort: Ein Element, das nicht
+  existiert, ist verborgen und abgelöst. Prüfen Sie den Selektor zuerst mit einem `find` oder einem Warten auf `visible`.
+* `TESTID` liest standardmäßig `data-testid`. Eine Seite, die ihre Elemente mit `data-test` (oder einem anderen Namen) markiert, wird
+  erst gefunden, wenn die Suite `testIdAttribute` setzt. Ohne es findet der Schritt das Element nicht.
+* Der Seiten-Dump (`page.dump.html`) und der Trace enthalten, was `fill` und `press` eingegeben haben. Das Maskieren von Geheimnissen durch venom
+  erreicht sie nicht. Geben Sie kein Geheimnis mit `press` ein, eine Taste nach der anderen. Siehe [Fehlerdiagnose](#failure-diagnostics).
+* `press` ist kein Tippen. Es sendet Tasten, keinen Text: `press: Hello` schlägt fehl. Verwenden Sie `fill`, um einen Text einzugeben.
+
+## Beispiel {#example-22}
 Ein globales Beispiel
 
 ```yaml

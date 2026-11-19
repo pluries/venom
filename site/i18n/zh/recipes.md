@@ -2,9 +2,9 @@
 translates: recipes
 title: 配方
 description: 把浏览器和移动端测试写成配方，并用检查和反向对照来证明它们。
-fingerprint: 3dd31333d7ad4d4487d1c297fdc7e02dc69595aee1619af22617d3bfb867d5d5
+fingerprint: 82005e3722eb38017980efc2b70ccd792894888e52d1846d5c7918662e03d91a
 drafted_by: claude
-drafted_on: 2026-11-18
+drafted_on: 2026-11-19
 status: machine-drafted
 ---
 配方是一个驱动网页或移动应用的 venom 测试套件。本页说明如何组织配方、如何命名、如何证明它们确实在测试某些东西，以及如何不让密钥和结果出现在不该出现的地方。您需要 venom；如果是网页配方，还需要一个由 Playwright 安装的浏览器。[web executor](web.html) 和 [mobile executor](mobile.html) 两个页面列出了所有操作。
@@ -52,13 +52,26 @@ vars:
 
 ## 选择器 {#selectors}
 
-`find`、`click` 或 `fill` 步骤需要一个选择器。使用 CSS 或 XPath。优先使用稳定的测试属性，例如 `data-test`：
+`find`、`click` 或 `fill` 步骤需要一个选择器。键 `locator` 说明如何读取它：`CSS`、`XPATH`、`ROLE`、`TEXT`、`LABEL`、`PLACEHOLDER` 或 `TESTID`。
+
+请优先使用 ROLE 和 TESTID 定位器，而不是 CSS 路径。`ROLE` 按元素是什么以及它的名称来查找，就像用户看到的那样。`TESTID` 按页面仅为测试而设置的测试 id 来查找：
 
 ```
-find: '[data-test="add-button"]'
+find:
+  locator: ROLE
+  selector: button
+  name: Add item
 ```
 
-当有人重新设计页面样式时，id 和类名会改变。`data-test` 属性的存在只是为了让测试能找到该元素。如果应用没有这类属性，请在编写配方之前请开发人员添加。
+```
+find:
+  locator: TESTID
+  selector: add-button
+```
+
+当有人重新设计页面样式时，id 和类名会改变。角色加名称，或测试 id，则会保持不变。如果页面没有可用的角色或测试 id，请在编写配方之前请开发人员添加。只有在没有其他方式能匹配时，才退回到 CSS 或 XPath。
+
+`TESTID` 读取属性 `data-testid`。许多页面改用 `data-test`，这时 `TESTID` 什么也找不到。请在测试套件中把变量 `web.testIdAttribute` 设置一次，值为页面使用的名称，例如 `testIdAttribute: data-test`。[web executor](web.html) 页面列出了每种定位器及其规则。
 
 `find` 不会等待。它统计的是此刻已经存在的元素数量。如果页面在首次绘制之后才加载数据，请先用 `wait` 等待，或者使用 `click` 或 `fill`，它们会等待各自的元素。在移动端步骤中，只设置一个定位器，例如 `accessibilityId`。
 
@@ -80,11 +93,11 @@ venom recipe check --specs-dir <folder of the specs> tests/site
 
 ## executor 无法做到的事 {#what-the-executors-cannot-do}
 
-web executor 没有悬停、拖动或键盘快捷键的步骤，而且 `find` 无法读取滚动宽度之类的数字。`execute` 操作会在页面中运行脚本并返回一个值，您可以对该值做断言。下面这个例子读取页面可以横向滚动多远，以及它列出了多少个条目：
+web executor 有 `hover`、`dragAndDrop` 和 `press` 步骤，后者用于按下一个键或 `Control+A` 这类组合键，另有 `waitFor`，用于等待元素出现或消失。`find` 无法读取滚动宽度之类的数字。`execute` 操作会在页面中运行脚本并返回一个值，您可以对该值做断言。下面这个例子读取页面可以横向滚动多远，以及它列出了多少个条目：
 
 {{include site/examples/recipes/web-execute.yml yaml}}
 
-如果 `execute` 仍然不够，就把这个缺口记录下来，不要为该场景编写配方。不要把一个测试用例的所有断言都放在同一个脚本结果上而不做反向对照：检查读不了脚本。
+`waitFor` 的状态为 `hidden` 或 `detached` 时，遇到拼错的选择器会立即通过，所以请先检查选择器。`press` 发送的是按键，不是文本，而转储或跟踪中包含 `fill` 和 `press` 输入的内容。如果 `execute` 仍然不够，就把这个缺口记录下来，不要为该场景编写配方。不要把一个测试用例的所有断言都放在同一个脚本结果上而不做反向对照：检查读不了脚本。
 
 移动端配方需要一个 Appium 服务器以及一台设备或模拟器。没有它们就无法运行。下面这个配方的第一行带有标记 `# needs: device`，因此在没有设备的地方，站点的测试会跳过它：
 

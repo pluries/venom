@@ -124,6 +124,10 @@ type WebContext struct { //nolint:revive // exported name kept for module compat
 
 	// tracing records the step's chunk of the trace (FR-08); nil when web.trace is off, or once a tracing call failed.
 	tracing tracing
+
+	// testIDAttr is the attribute a TESTID locator reads, web.testIdAttribute; empty, as in a WebContext Setup did not
+	// make, means data-testid.
+	testIDAttr string
 }
 
 // openSession starts Playwright, launches the browser and opens the suite's context and page. Whatever it opened is
@@ -134,6 +138,7 @@ func openSession(ctx context.Context, cfg setupConfig) (*WebContext, error) {
 		closing:           make(chan struct{}),
 		nav:               newNavigations(),
 		navigationTimeout: time.Duration(cfg.navigationTimeout) * time.Millisecond,
+		testIDAttr:        cfg.testIDAttr,
 	}
 	d, err := runPlaywright()
 	if err != nil {

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/mxschmitt/playwright-go"
@@ -36,9 +37,15 @@ type setupConfig struct {
 	// trace is web.trace, off by default: a failing step leaves its Playwright trace (FR-08,
 	// docs/feat/2048/research.md R9).
 	trace bool
+	// testIDAttr is web.testIdAttribute; empty means data-testid.
+	testIDAttr string
 }
 
-func readSetupConfig(ctx context.Context) setupConfig {
+func readSetupConfig(ctx context.Context) (setupConfig, error) {
+	attr, err := testIDAttribute(ctx)
+	if err != nil {
+		return setupConfig{}, err
+	}
 	name := browserName(venom.StringVarFromCtx(ctx, "web.driver"))
 	warnInertVariables(ctx, name)
 	return setupConfig{
@@ -47,7 +54,23 @@ func readSetupConfig(ctx context.Context) setupConfig {
 		context:           contextOptions(ctx),
 		navigationTimeout: navigationTimeout(ctx),
 		trace:             venom.BoolVarFromCtx(ctx, "web.trace"),
+		testIDAttr:        attr,
+	}, nil
+}
+
+// attributeName is what web.testIdAttribute may hold: a name that, escaped as a CSS identifier, stays one attribute.
+var attributeName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_:.-]*$`)
+
+// testIDAttribute is web.testIdAttribute, data-testid when the suite sets none.
+func testIDAttribute(ctx context.Context) (string, error) {
+	attr := venom.StringVarFromCtx(ctx, "web.testIdAttribute")
+	if attr == "" {
+		return defaultTestIDAttr, nil
 	}
+	if !attributeName.MatchString(attr) {
+		return "", fmt.Errorf("invalid web.testIdAttribute %q (must be an attribute name: a letter or _, then letters, digits, _, -, . or :)", attr)
+	}
+	return attr, nil
 }
 
 // browserName maps web.driver onto Playwright's browsers; any other value is chrome, as it always was.

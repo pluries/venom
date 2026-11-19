@@ -43,13 +43,26 @@ To see which scenarios a recipe proves, add `--coverage` with the spec id: `veno
 
 ## Selectors
 
-A `find`, `click` or `fill` step takes a selector. Use CSS or XPath. Prefer a stable test attribute, such as `data-test`:
+A `find`, `click` or `fill` step takes a selector. The `locator` key says how to read it: `CSS`, `XPATH`, `ROLE`, `TEXT`, `LABEL`, `PLACEHOLDER` or `TESTID`.
+
+Prefer the ROLE and TESTID locators over a CSS path. `ROLE` finds an element by what it is and by its name, as a user sees it. `TESTID` finds it by a test id that the page sets only for tests:
 
 ```
-find: '[data-test="add-button"]'
+find:
+  locator: ROLE
+  selector: button
+  name: Add item
 ```
 
-Ids and class names change when someone restyles the page. A `data-test` attribute exists only so that tests can find the element. If the app has none, ask the developers to add them before you write the recipe.
+```
+find:
+  locator: TESTID
+  selector: add-button
+```
+
+Ids and class names change when someone restyles the page. A role and a name, or a test id, stay. If the page has no usable role or test id, ask the developers to add them before you write the recipe. Fall back to CSS or XPath only when nothing else matches.
+
+`TESTID` reads the attribute `data-testid`. Many pages use `data-test` instead, and then `TESTID` finds nothing. Set the variable `web.testIdAttribute` once in the suite to the name the page uses, for example `testIdAttribute: data-test`. The [web executor](web.html) page lists every locator and its rules.
 
 `find` does not wait. It counts the elements that exist now. When the page loads data after the first paint, wait first with `wait`, or use a `click` or `fill`, which wait for their element. In a mobile step, set exactly one locator, such as `accessibilityId`.
 
@@ -71,11 +84,11 @@ The check is static. It cannot read inside an `execute` script and cannot know w
 
 ## What the executors cannot do
 
-The web executor has no step for hover, drag or a keyboard shortcut, and `find` cannot read a number such as a scroll width. The `execute` action runs a script in the page and returns a value, which you can assert on. This example reads how far the page scrolls sideways and how many items it lists:
+The web executor has the steps `hover`, `dragAndDrop` and `press` for a key or a chord such as `Control+A`, and `waitFor` for an element that appears or goes away. `find` cannot read a number such as a scroll width. The `execute` action runs a script in the page and returns a value, which you can assert on. This example reads how far the page scrolls sideways and how many items it lists:
 
 {{include site/examples/recipes/web-execute.yml yaml}}
 
-If `execute` is not enough, write down the gap and do not write a recipe for that scenario. Do not put all assertions of a testcase on one script result without a negative control: the check cannot read the script.
+A `waitFor` with the state `hidden` or `detached` passes at once on a mistyped selector, so check the selector first. `press` sends keys, not a text, and a dump or a trace holds what `fill` and `press` typed. If `execute` is not enough, write down the gap and do not write a recipe for that scenario. Do not put all assertions of a testcase on one script result without a negative control: the check cannot read the script.
 
 A mobile recipe needs an Appium server and a device or an emulator. It does not run without them. This one is tagged `# needs: device` on its first line, so the tests of the site skip it where no device exists:
 

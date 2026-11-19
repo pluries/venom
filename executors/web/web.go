@@ -85,7 +85,11 @@ func (Executor) ZeroValueResult() interface{} {
 // Setup starts Playwright and opens the suite's browser session (FR-03).
 func (Executor) Setup(ctx context.Context, _ venom.H) (context.Context, error) {
 	venom.Info(ctx, "Setup")
-	webCtx, err := openSession(ctx, readSetupConfig(ctx))
+	cfg, err := readSetupConfig(ctx)
+	if err != nil {
+		return ctx, err
+	}
+	webCtx, err := openSession(ctx, cfg)
 	if err != nil {
 		return ctx, err
 	}
@@ -133,6 +137,10 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 // of it, not the trace.
 func runStep(ctx context.Context, webCtx *WebContext, step venom.TestStep) (*Result, error) {
 	start := time.Now()
+
+	if err := validateNewActions(step); err != nil {
+		return nil, err
+	}
 
 	// transform step to Executor Instance
 	var e Executor
@@ -241,6 +249,22 @@ func (e Executor) performAction(ctx context.Context, webCtx *WebContext, r *Resu
 		return historyAction(webCtx, e.Action.HistoryAction)
 	case e.Action.Execute != nil:
 		return executeScript(ctx, webCtx, e.Action.Execute, r)
+	default:
+		return e.performRecipeAction(ctx, webCtx)
+	}
+}
+
+// performRecipeAction runs the first of the actions that come after execute: waitFor, hover, dragAndDrop, press.
+func (e Executor) performRecipeAction(ctx context.Context, webCtx *WebContext) error {
+	switch {
+	case e.Action.WaitFor != nil:
+		return waitFor(ctx, webCtx, e.Action.WaitFor)
+	case e.Action.Hover != nil:
+		return hover(ctx, webCtx, e.Action.Hover)
+	case e.Action.DragAndDrop != nil:
+		return dragAndDrop(ctx, webCtx, e.Action.DragAndDrop)
+	case e.Action.Press != nil:
+		return press(ctx, webCtx, e.Action.Press)
 	}
 	return nil
 }
@@ -257,7 +281,7 @@ func (a Action) callsFrame() bool {
 	case a.Select != nil, a.UploadFile != nil, a.SelectFrame != nil:
 		return true
 	default:
-		return !a.SelectRootFrame && !a.NextWindow && a.HistoryAction == "" && a.Execute != nil
+		return !a.SelectRootFrame && !a.NextWindow && a.HistoryAction == "" && (a.Execute != nil || a.reachesFrame())
 	}
 }
 
@@ -596,39 +620,11 @@ func findOne(ctx context.Context, webCtx *WebContext, findElement interface{}) (
 // locate is every element matching findElement in the current frame. A CSS selector pierces open shadow roots
 // (FR-05); an XPath does not.
 func locate(ctx context.Context, webCtx *WebContext, findElement interface{}) (element, error) {
-	selector, locator, err := readFindElement(ctx, findElement)
+	spec, err := parseFind(ctx, findElement)
 	if err != nil {
 		return nil, err
 	}
-	engine := "css="
-	if locator == xpathLocator {
-		engine = "xpath="
-	}
-	return webCtx.frame().locator(engine + selector), nil
-}
-
-// Identify selector and locator from a find element
-func readFindElement(ctx context.Context, findElement interface{}) (string, string, error) {
-	selector := ""
-	locator := cssLocator
-	if find, ok := findElement.(string); ok {
-		venom.Warning(ctx, "web - findElement : this find element syntax deprecated and will be not supported in next version")
-		selector = find
-	} else if find, ok := findElement.(map[string]interface{}); ok {
-		selector, ok = find["selector"].(string)
-		if !ok {
-			return "", "", fmt.Errorf("invalid find element selector %v (must be a string)", find["selector"])
-		}
-		if find["locator"] == "XPATH" {
-			locator = xpathLocator
-		} else if find["locator"] != "CSS" {
-			return "", "", fmt.Errorf("invalid find element locator '%s' (must be CSS or XPATH)", find["locator"])
-		}
-	} else {
-		return "", "", fmt.Errorf("invalid find element structure %v\n (must be a string or a element with selector and locator attribute)", findElement)
-	}
-
-	return selector, locator, nil
+	return resolveLocator(webCtx.frame(), spec, webCtx.testIDAttr), nil
 }
 
 // takeScreenshot writes the viewport of the page as PNG, whatever the file's extension, as WebDriver's screenshots

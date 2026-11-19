@@ -1019,7 +1019,7 @@ func TestRun_actionErrors(t *testing.T) {
 		{
 			name:    "find: bad locator",
 			step:    action(map[string]interface{}{"find": map[string]interface{}{"selector": ".item", "locator": "ID"}}),
-			wantErr: "invalid find element locator 'ID' (must be CSS or XPATH)",
+			wantErr: "invalid find element locator 'ID' (must be CSS, XPATH, ROLE, TEXT, LABEL, PLACEHOLDER or TESTID)",
 		},
 		{
 			name:    "find: lookup failed",
@@ -1573,7 +1573,7 @@ func TestRun_withoutSetupPanics(t *testing.T) {
 	assert.Panics(t, func() { _, _ = Executor{}.Run(context.Background(), venom.TestStep{}) }) //nolint:errcheck // it panics before returning
 }
 
-func TestReadFindElement(t *testing.T) {
+func TestParseFind_selectorAndKindOfTheLegacyForms(t *testing.T) {
 	venom.InitTestLogger(t)
 	tests := []struct {
 		name         string
@@ -1588,13 +1588,13 @@ func TestReadFindElement(t *testing.T) {
 		{
 			name:    "the locator is case-sensitive",
 			find:    map[string]interface{}{"selector": "#a", "locator": "css"},
-			wantErr: "invalid find element locator 'css' (must be CSS or XPATH)",
+			wantErr: "invalid find element locator 'css' (must be CSS, XPATH, ROLE, TEXT, LABEL, PLACEHOLDER or TESTID)",
 		},
 		{
 			// The map form has no default locator, unlike the string form.
 			name:    "a missing locator is an error",
 			find:    map[string]interface{}{"selector": "#a"},
-			wantErr: "invalid find element locator '%!s(<nil>)' (must be CSS or XPATH)",
+			wantErr: "invalid find element locator '%!s(<nil>)' (must be CSS, XPATH, ROLE, TEXT, LABEL, PLACEHOLDER or TESTID)",
 		},
 		{
 			name:    "a non-string selector",
@@ -1615,29 +1615,29 @@ func TestReadFindElement(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			selector, locator, err := readFindElement(context.Background(), tt.find)
+			spec, err := parseFind(context.Background(), tt.find)
 			if tt.wantErr != "" {
 				require.EqualError(t, err, tt.wantErr)
-				assert.Empty(t, selector)
-				assert.Empty(t, locator)
+				assert.Empty(t, spec.selector)
+				assert.Empty(t, spec.kind)
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, tt.wantSelector, selector)
-			assert.Equal(t, tt.wantLocator, locator)
+			assert.Equal(t, tt.wantSelector, spec.selector)
+			assert.Equal(t, tt.wantLocator, spec.kind)
 		})
 	}
 }
 
-// TestReadFindElement_deprecatedStringWarns pins the Warning venom logs for the deprecated bare-string find
+// TestParseFind_deprecatedStringWarns pins the Warning venom logs for the deprecated bare-string find
 // syntax ("string (deprecated) is CSS" above pins its return value only).
-func TestReadFindElement_deprecatedStringWarns(t *testing.T) {
-	var selector, locator string
+func TestParseFind_deprecatedStringWarns(t *testing.T) {
+	var spec locatorSpec
 	var findErr error
-	out := stderrOf(t, func() { selector, locator, findErr = readFindElement(context.Background(), "#go") })
+	out := stderrOf(t, func() { spec, findErr = parseFind(context.Background(), "#go") })
 	require.NoError(t, findErr)
-	assert.Equal(t, "#go", selector)
-	assert.Equal(t, "css selector", locator)
+	assert.Equal(t, "#go", spec.selector)
+	assert.Equal(t, "css selector", spec.kind)
 	assert.Contains(t, out, "web - findElement : this find element syntax deprecated")
 }
 
@@ -1683,4 +1683,47 @@ func TestPlaywrightKeys(t *testing.T) {
 		assert.False(t, ok)
 		assert.Empty(t, logged)
 	})
+}
+
+func TestSetup_testIdAttribute(t *testing.T) {
+	// US1-AS6, FR-005: web.testIdAttribute is the attribute a TESTID locator reads, data-testid without it; a name that
+	// is not an attribute name is refused by Setup before the driver starts.
+	testIDStep := findStep(loc("TESTID", "item-input"))
+
+	t.Run("without the variable a TESTID reads data-testid", func(t *testing.T) {
+		pw := withFake(t)
+		ctx := openFake(t, pw)
+		mustRun(ctx, t, testIDStep)
+		assert.Equal(t, []string{`Count css=[data-testid="item-input"]`}, callsWithPrefix(pw.seen(), "Count"))
+	})
+
+	t.Run("data-test is honoured", func(t *testing.T) {
+		pw := withFake(t)
+		t.Chdir(t.TempDir())
+		ctx, err := setupFake(t, map[string]any{"testIdAttribute": "data-test"})
+		require.NoError(t, err)
+		assert.Equal(t, "data-test", getWebCtx(ctx).testIDAttr)
+		pw.reset()
+		mustRun(ctx, t, testIDStep)
+		assert.Equal(t, []string{`Count css=[data-test="item-input"]`}, callsWithPrefix(pw.seen(), "Count"))
+	})
+
+	for _, name := range []string{"data-test", "data-qa", "_qa", "qa", "data-a.b", "data-a:b", "Data_Test-1"} {
+		t.Run("accepted: "+name, func(t *testing.T) {
+			withFake(t)
+			_, err := setupFake(t, map[string]any{"testIdAttribute": name})
+			require.NoError(t, err)
+		})
+	}
+
+	for _, name := range []string{"1abc", "-qa", ".qa", "a b", "a\"b", "a]b", "a=b", "data-test\n", "données", "a/b", "a\x00b"} {
+		t.Run("refused: "+name, func(t *testing.T) {
+			pw := withFake(t)
+			ctx, err := setupFake(t, map[string]any{"testIdAttribute": name})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "testIdAttribute")
+			assert.Nil(t, getWebCtx(ctx))
+			assert.Empty(t, pw.seen(), "nothing started: no driver, no browser")
+		})
+	}
 }
