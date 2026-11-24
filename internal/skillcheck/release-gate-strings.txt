@@ -1,0 +1,3 @@
+# The stale install texts of the README and the site (FR-018 c): one string per line, matched as plain text.
+# gate_test.go fails the release while any of them is still in README.md or in the site pages.
+# Empty on purpose until the maker decides which texts are stale and corrects them (task T043).

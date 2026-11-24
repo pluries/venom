@@ -8,7 +8,7 @@ const sizeCap = 1 << 40
 
 // aliasSize is the number of nodes of a document once its aliases are expanded, and how many of them come from an
 // alias. Both saturate at sizeCap, so that an alias bomb is counted without being walked.
-type aliasSize struct{ total, viaAlias int }
+type aliasSize struct{ total, viaAlias int64 }
 
 type aliasSizer struct {
 	memo   map[*yamlv3.Node]aliasSize
@@ -46,7 +46,7 @@ func (a *aliasSizer) sizeOfAlias(n *yamlv3.Node) aliasSize {
 }
 
 // allowedAliasRatio is yaml.v3's decoder limit on the share of alias-derived nodes, by decoded size.
-func allowedAliasRatio(total int) float64 {
+func allowedAliasRatio(total int64) float64 {
 	switch {
 	case total <= 400000:
 		return 0.99

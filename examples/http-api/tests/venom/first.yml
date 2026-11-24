@@ -1,0 +1,36 @@
+name: First suite
+vars:
+  base_url: ""        # given at run time
+  token: ""           # given at run time (VENOM_VAR_token), never written here
+secrets:
+  - token
+testcases:
+  - name: the service answers
+    steps:
+      - type: http
+        method: GET
+        url: "{{.base_url}}/health"
+        assertions:
+          - result.statuscode ShouldEqual 200
+          - result.bodyjson.status ShouldEqual ok
+
+  - name: items are listed with the token
+    steps:
+      - type: http
+        method: GET
+        url: "{{.base_url}}/items"
+        headers:
+          Authorization: "Bearer {{.token}}"
+        assertions:
+          - result.statuscode ShouldEqual 200
+          - result.bodyjson ShouldHaveLength 2
+          - result.bodyjson.bodyjson0.name ShouldEqual widget
+          - result.bodyjson.bodyjson1.name ShouldEqual gadget
+
+  - name: items are refused without the token
+    steps:
+      - type: http
+        method: GET
+        url: "{{.base_url}}/items"
+        assertions:
+          - result.statuscode ShouldEqual 401

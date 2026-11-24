@@ -1,0 +1,27 @@
+name: First suite
+vars:
+  grpc_address: ""     # given at run time, host:port without http://
+testcases:
+  - name: the health service answers SERVING
+    steps:
+      - type: grpc
+        url: "{{.grpc_address}}"
+        service: grpc.health.v1.Health
+        method: Check
+        data:
+          service: ""
+        assertions:
+          - result.err ShouldBeEmpty
+          - result.code ShouldEqual 0
+          - result.systemoutjson.status ShouldEqual SERVING
+
+  - name: an unknown service is not found
+    steps:
+      - type: grpc
+        url: "{{.grpc_address}}"
+        service: grpc.health.v1.Health
+        method: Check
+        data:
+          service: does-not-exist
+        assertions:
+          - result.code ShouldEqual 5

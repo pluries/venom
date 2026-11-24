@@ -1,0 +1,3 @@
+strict_variables: true
+format: xml
+output_dir: tests/venom/results

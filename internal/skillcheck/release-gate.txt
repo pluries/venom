@@ -1,0 +1,5 @@
+# The merge commits of the specs whose features the skill's recipes need (FR-018 a): web and mobile recipes
+# (spec 014) and web recipe actions (spec 015). One per line: a name, then the full commit hash.
+# gate_test.go checks that the venom release the skill targets contains both. Not secret.
+spec014 d60ca45e766899a4884d146383b795caa00ca76a
+spec015 5443c968ba1bfd392b15d84ed1cc1ad5f2cf150c
