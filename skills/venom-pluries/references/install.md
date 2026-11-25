@@ -79,7 +79,7 @@ The image is `ghcr.io/pluries/venom`. It is built for linux/amd64 only; on anoth
 1. Resolve the digest of the pinned tag, with approval of the command:
 
    ```bash
-   docker buildx imagetools inspect ghcr.io/pluries/venom:v1.5.0-pluries.1
+   docker buildx imagetools inspect ghcr.io/pluries/venom:v1.5.0-pluries.2
    ```
 
 2. Write the full reference with the digest, `ghcr.io/pluries/venom@sha256:<digest>`, alone on one line to

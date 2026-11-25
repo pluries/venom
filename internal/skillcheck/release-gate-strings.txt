@@ -1,3 +1,7 @@
 # The stale install texts of the README and the site (FR-018 c): one string per line, matched as plain text.
 # gate_test.go fails the release while any of them is still in README.md or in the site pages.
-# Empty on purpose until the maker decides which texts are stale and corrects them (task T043).
+# Filled by task T043 (#3943): the texts the maker decided were stale and corrected on 2026-11-24.
+`venom.freebsd-amd64` and `venom.openbsd-amd64`, plus the checksum list `SHA256SUMS` and its signature `SHA256SUMS.p7s`.
+You need Go and a clone of the venom repository.
+Build the command line tool from a clone of the repository:
+When a release exists, you can download its binary instead of building it.

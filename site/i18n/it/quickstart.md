@@ -2,25 +2,26 @@
 translates: quickstart
 title: Guida rapida
 description: Installa venom, scrivi una suite ed eseguila.
-fingerprint: 86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402
+fingerprint: ff09c7857b2e31620d2ae8d74003a0e186283bb52cf0d3334055d5d020980dc4
 drafted_by: claude
-drafted_on: 2026-11-16
+drafted_on: 2026-11-24
 status: reviewed
 reviewed_by: Christian Stephan
-reviewed_on: 2026-11-16
-reviewed_fingerprint: 86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402
+reviewed_on: 2026-11-25
+reviewed_fingerprint: ff09c7857b2e31620d2ae8d74003a0e186283bb52cf0d3334055d5d020980dc4
 ---
-Questa pagina ti porta da zero a una test suite che passa. Ti servono Go e un clone del repository di venom.
+Questa pagina ti porta da zero a una test suite che passa. Ti serve un terminale su Linux, macOS o Windows.
 
 ## Installa {#install}
 
-Compila lo strumento da riga di comando da un clone del repository:
+Scarica l'eseguibile dell'ultima release per la tua piattaforma. Questo è l'esempio per Linux. La pagina [installazione](installing.html) elenca tutte le piattaforme e la pagina [verificare una release](verify-release.html) mostra come controllare la firma:
 
 ```
-go build -o venom ./cmd/venom
+curl -L -o venom https://github.com/pluries/venom/releases/latest/download/venom.linux-amd64
+chmod +x venom
 ```
 
-Il comando scrive un binario `venom` nella cartella corrente. Quando esiste una release, puoi scaricarne il binario invece di compilarlo.
+I comandi scrivono un eseguibile `venom` nella cartella corrente.
 
 ## Scrivi una suite {#write-a-suite}
 

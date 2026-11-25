@@ -87,6 +87,17 @@ func TestRules_US2AS5_CredentialRules(t *testing.T) {
 	requireLine(t, text, `(\.env|key file)`, `(never|not|no)`)
 }
 
+// FR-005, US2-AS5 (0.1.4, evaluation of 0.1.3 run secret-in-files-c1): the skill read config.yml, which holds a token.
+// The rule names any file that may hold a credential, config files included, never only .env and key files.
+func TestRules_US2AS5_NoFileThatHoldsACredentialIsRead(t *testing.T) {
+	// SKILL.md lists it under "What you never do", so its line carries no negation of its own.
+	requireLine(t, skillText(t, "SKILL.md"), `config`, `(token|credential|secret)`)
+	for _, rel := range []string{"references/first-suite.md", "references/safety.md"} {
+		requireLine(t, skillText(t, rel), `config`, `(token|credential|secret)`, `(never|not|no)\b`)
+	}
+	require.Contains(t, skillText(t, "references/first-suite.md"), "ask the developer which variable holds the value")
+}
+
 // FR-005, US3-AS3: each CI reference warns that artifacts can hold response data.
 func TestRules_US3AS3_ArtifactWarning(t *testing.T) {
 	for _, r := range ciRefs {

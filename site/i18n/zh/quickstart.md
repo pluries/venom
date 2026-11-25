@@ -2,25 +2,26 @@
 translates: quickstart
 title: 快速入门
 description: 安装 venom，编写测试套件并运行它。
-fingerprint: 86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402
+fingerprint: ff09c7857b2e31620d2ae8d74003a0e186283bb52cf0d3334055d5d020980dc4
 drafted_by: claude
-drafted_on: 2026-11-16
+drafted_on: 2026-11-24
 status: reviewed
 reviewed_by: Christian Stephan
-reviewed_on: 2026-11-16
-reviewed_fingerprint: 86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402
+reviewed_on: 2026-11-25
+reviewed_fingerprint: ff09c7857b2e31620d2ae8d74003a0e186283bb52cf0d3334055d5d020980dc4
 ---
-本页带您从零开始，直到一个测试套件成功通过。您需要 Go，以及 venom 仓库的一份克隆。
+本页带您从零开始，直到一个测试套件成功通过。您需要 Linux、macOS 或 Windows 上的一个终端。
 
 ## 安装 {#install}
 
-在仓库的克隆目录中构建命令行工具：
+下载适用于您平台的最新发布版本的可执行文件。这是 Linux 的示例。[安装](installing.html)页面列出了所有平台，[验证发布版本](verify-release.html)页面说明如何检查签名：
 
 ```
-go build -o venom ./cmd/venom
+curl -L -o venom https://github.com/pluries/venom/releases/latest/download/venom.linux-amd64
+chmod +x venom
 ```
 
-该命令会在当前文件夹中生成一个 `venom` 可执行文件。如果已有发布版本，您也可以直接下载其可执行文件，而不必自行构建。
+这些命令会在当前文件夹中生成一个 `venom` 可执行文件。
 
 ## 编写测试套件 {#write-a-suite}
 

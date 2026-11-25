@@ -2,25 +2,26 @@
 translates: quickstart
 title: Démarrage rapide
 description: Installez venom, écrivez une suite et lancez-la.
-fingerprint: 86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402
+fingerprint: ff09c7857b2e31620d2ae8d74003a0e186283bb52cf0d3334055d5d020980dc4
 drafted_by: claude
-drafted_on: 2026-11-16
+drafted_on: 2026-11-24
 status: reviewed
 reviewed_by: Christian Stephan
-reviewed_on: 2026-11-16
-reviewed_fingerprint: 86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402
+reviewed_on: 2026-11-25
+reviewed_fingerprint: ff09c7857b2e31620d2ae8d74003a0e186283bb52cf0d3334055d5d020980dc4
 ---
-Cette page vous conduit de zéro à une suite de tests qui passe. Il vous faut Go et un clone du dépôt venom.
+Cette page vous conduit de zéro à une suite de tests qui passe. Il vous faut un terminal sous Linux, macOS ou Windows.
 
 ## Installation {#install}
 
-Compilez l'outil en ligne de commande depuis un clone du dépôt :
+Téléchargez l'exécutable de la dernière release pour votre plateforme. Voici l'exemple Linux. La page [installation](installing.html) liste toutes les plateformes, et la page [vérifier une version](verify-release.html) montre comment contrôler la signature :
 
 ```
-go build -o venom ./cmd/venom
+curl -L -o venom https://github.com/pluries/venom/releases/latest/download/venom.linux-amd64
+chmod +x venom
 ```
 
-La commande produit un binaire `venom` dans le dossier courant. Lorsqu'une release existe, vous pouvez télécharger son binaire au lieu de compiler.
+Les commandes produisent un exécutable `venom` dans le dossier courant.
 
 ## Écrire une suite {#write-a-suite}
 

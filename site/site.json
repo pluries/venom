@@ -169,6 +169,13 @@
       "description": "Write browser and mobile tests as recipes that a check and a negative control can prove."
     },
     {
+      "slug": "verify-release",
+      "title": "Verify a release",
+      "source": "site/pages/verify-release.md",
+      "group": "Guides",
+      "description": "Check that a release is signed by the maintainer's certificate."
+    },
+    {
       "slug": "contributing",
       "title": "Contributing",
       "source": "CONTRIBUTING.md",

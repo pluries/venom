@@ -5,7 +5,7 @@ part only when the project has a web or mobile feature to test. The Recipes page
 `https://venom.pluries.dev/recipes.html`, shows how to lay recipes out and name them; read it before you write one.
 
 **Version.** Web recipes need the locators and actions of the web executor and the `venom recipe check` command. They exist
-only in a venom release newer than the one that carried the first version of this skill. Before you write a recipe, run
+from `v1.5.0-pluries.2` on, and not in `v1.5.0-pluries.1`. Before you write a recipe, run
 `venom recipe check --help`. If the command does not exist in the pinned version, say which version has it, and do not write a
 recipe that the pinned venom cannot run.
 
@@ -36,6 +36,11 @@ recipe that the pinned venom cannot run.
 
    Add `--specs-dir <folder>` when the project keeps its specs in a folder. Report each finding. Exit code 0 means no finding,
    1 means findings, 2 means the input could not be used.
+
+   The check ties every testcase to a scenario of a spec: the testcase name starts with the scenario id, for example
+   `US1-AS1`. If the project has no spec for the page, ask the developer for the scenarios. Do not write or edit a spec
+   yourself, and do not invent scenarios from what the page does today. Say that the check will report the missing spec
+   until the developer gives the scenarios, and that the recipe is not proven before then.
 5. A recipe is not proven until the check is clean and its negative control fails as expected: change one expected value, show
    the recipe failing on it, restore it. Do not say a recipe is proven before that.
 

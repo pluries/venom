@@ -1,14 +1,15 @@
-This page takes you from nothing to one passing test suite. You need Go and a clone of the venom repository.
+This page takes you from nothing to one passing test suite. You need a terminal on Linux, macOS or Windows.
 
 ## Install
 
-Build the command line tool from a clone of the repository:
+Download the executable of the latest release for your platform. This is the Linux example. The [installing](installing.html) page lists every platform, and the page [verify a release](verify-release.html) shows how to check the signature:
 
 ```
-go build -o venom ./cmd/venom
+curl -L -o venom https://github.com/pluries/venom/releases/latest/download/venom.linux-amd64
+chmod +x venom
 ```
 
-The command writes a `venom` binary in the current folder. When a release exists, you can download its binary instead of building it.
+The commands write a `venom` executable in the current folder.
 
 ## Write a suite
 

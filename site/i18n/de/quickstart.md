@@ -2,25 +2,26 @@
 translates: quickstart
 title: Schnellstart
 description: Venom installieren, eine Suite schreiben und ausführen.
-fingerprint: 86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402
+fingerprint: ff09c7857b2e31620d2ae8d74003a0e186283bb52cf0d3334055d5d020980dc4
 drafted_by: claude
-drafted_on: 2026-11-16
+drafted_on: 2026-11-24
 status: reviewed
 reviewed_by: Christian Stephan
-reviewed_on: 2026-11-16
-reviewed_fingerprint: 86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402
+reviewed_on: 2026-11-25
+reviewed_fingerprint: ff09c7857b2e31620d2ae8d74003a0e186283bb52cf0d3334055d5d020980dc4
 ---
-Diese Seite führt Sie von Null zu einer erfolgreichen Test-Suite. Sie brauchen Go und einen Klon des venom-Repositorys.
+Diese Seite führt Sie von Null zu einer erfolgreichen Test-Suite. Sie brauchen ein Terminal unter Linux, macOS oder Windows.
 
 ## Installieren {#install}
 
-Bauen Sie das Kommandozeilenwerkzeug aus einem Klon des Repositorys:
+Laden Sie die ausführbare Datei des neuesten Releases für Ihre Plattform herunter. Das ist das Linux-Beispiel. Die Seite [Installation](installing.html) listet alle Plattformen, und die Seite [Ein Release prüfen](verify-release.html) zeigt, wie Sie die Signatur prüfen:
 
 ```
-go build -o venom ./cmd/venom
+curl -L -o venom https://github.com/pluries/venom/releases/latest/download/venom.linux-amd64
+chmod +x venom
 ```
 
-Der Befehl schreibt eine `venom`-Binärdatei in den aktuellen Ordner. Sobald ein Release existiert, können Sie stattdessen dessen Binärdatei herunterladen, statt sie zu bauen.
+Die Befehle schreiben eine ausführbare `venom`-Datei in den aktuellen Ordner.
 
 ## Eine Suite schreiben {#write-a-suite}
 

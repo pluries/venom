@@ -26,10 +26,10 @@
   {
     "language": "de",
     "slug": "installing",
-    "fingerprint": "93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310",
-    "translation_fingerprint": "f6e5b5957e63874bd9e8c962795a2b54be51d3286ef4e6e7a3fb7e2882181147",
+    "fingerprint": "6b24ed9fedcdd72c1c379a6a9fa397e4c41b8332cfcf676a4cae3eca8d6e997e",
+    "translation_fingerprint": "0180ce41a2ee7be4e5e98d481eb29a63c981ebf305e47cbe1aae52a14d8a26a4",
     "reviewer": "Christian Stephan",
-    "date": "2026-11-16"
+    "date": "2026-11-25"
   },
   {
     "language": "de",
@@ -42,10 +42,10 @@
   {
     "language": "de",
     "slug": "quickstart",
-    "fingerprint": "86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402",
-    "translation_fingerprint": "2cd911b5e295cead0349dab2019cc55fb0751f39830dd45e966c40a3e1cf234f",
+    "fingerprint": "ff09c7857b2e31620d2ae8d74003a0e186283bb52cf0d3334055d5d020980dc4",
+    "translation_fingerprint": "0ee68ffa5fa1f41d4c57835726fed8bd9b0fdec962d66d4869181bf8a2759bda",
     "reviewer": "Christian Stephan",
-    "date": "2026-11-16"
+    "date": "2026-11-25"
   },
   {
     "language": "de",
@@ -82,10 +82,10 @@
   {
     "language": "es",
     "slug": "installing",
-    "fingerprint": "93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310",
-    "translation_fingerprint": "d9c14a12a1ff5691173cc23a59e256ce509c4087a462e0a6b9fe2b0bf7ad0b32",
+    "fingerprint": "6b24ed9fedcdd72c1c379a6a9fa397e4c41b8332cfcf676a4cae3eca8d6e997e",
+    "translation_fingerprint": "ef55b74c050f77ef9d7ed3c9c96c9f750b144cc7ff86086ba072d28a00561cc0",
     "reviewer": "Christian Stephan",
-    "date": "2026-11-16"
+    "date": "2026-11-25"
   },
   {
     "language": "es",
@@ -98,10 +98,10 @@
   {
     "language": "es",
     "slug": "quickstart",
-    "fingerprint": "86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402",
-    "translation_fingerprint": "cf754807b47e26f26ccfac8d35823360a066f94e9a1d0d25957739c1b237e59e",
+    "fingerprint": "ff09c7857b2e31620d2ae8d74003a0e186283bb52cf0d3334055d5d020980dc4",
+    "translation_fingerprint": "89e0a515335836533bfd3869a4fa5ebb6578d5203f487251f46899d1e7ea43a5",
     "reviewer": "Christian Stephan",
-    "date": "2026-11-16"
+    "date": "2026-11-25"
   },
   {
     "language": "es",
@@ -138,10 +138,10 @@
   {
     "language": "fr",
     "slug": "installing",
-    "fingerprint": "93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310",
-    "translation_fingerprint": "1f7723fb293a9240cf0041e1e2e609b35afc587be2a6b0c92b6aa1db9954282d",
+    "fingerprint": "6b24ed9fedcdd72c1c379a6a9fa397e4c41b8332cfcf676a4cae3eca8d6e997e",
+    "translation_fingerprint": "be841129f6e44af1c5c3470071ff9477d8db56c82da10a98f495103096f4a88a",
     "reviewer": "Christian Stephan",
-    "date": "2026-11-16"
+    "date": "2026-11-25"
   },
   {
     "language": "fr",
@@ -154,10 +154,10 @@
   {
     "language": "fr",
     "slug": "quickstart",
-    "fingerprint": "86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402",
-    "translation_fingerprint": "65d6cf44dd6de4075cfc1e0bd1ff7fdebb2cebfae30509caf8476be9a16431a1",
+    "fingerprint": "ff09c7857b2e31620d2ae8d74003a0e186283bb52cf0d3334055d5d020980dc4",
+    "translation_fingerprint": "f3b324a8071b4d4edd3ce8ffbb9a0a7c584c848a9a108cb9597b261e9e1c97c6",
     "reviewer": "Christian Stephan",
-    "date": "2026-11-16"
+    "date": "2026-11-25"
   },
   {
     "language": "fr",
@@ -194,10 +194,10 @@
   {
     "language": "it",
     "slug": "installing",
-    "fingerprint": "93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310",
-    "translation_fingerprint": "32ef23955b9f9ab790f1a2fef9b1cad16c76b4e8047dc517f8f3c6f7d4cba744",
+    "fingerprint": "6b24ed9fedcdd72c1c379a6a9fa397e4c41b8332cfcf676a4cae3eca8d6e997e",
+    "translation_fingerprint": "0f4f6a33bf1f6b78f3291d171f7c722bd4708d57ae0bc698e653395d5792477e",
     "reviewer": "Christian Stephan",
-    "date": "2026-11-16"
+    "date": "2026-11-25"
   },
   {
     "language": "it",
@@ -210,10 +210,10 @@
   {
     "language": "it",
     "slug": "quickstart",
-    "fingerprint": "86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402",
-    "translation_fingerprint": "b6accd46d3a2451537ed7ec32aba003f91deac8caad301b400b2f6dc0870081d",
+    "fingerprint": "ff09c7857b2e31620d2ae8d74003a0e186283bb52cf0d3334055d5d020980dc4",
+    "translation_fingerprint": "232690288a872e09d538e8f30908f85ab15f958891cc806815a52430315f0288",
     "reviewer": "Christian Stephan",
-    "date": "2026-11-16"
+    "date": "2026-11-25"
   },
   {
     "language": "it",
@@ -250,10 +250,10 @@
   {
     "language": "zh",
     "slug": "installing",
-    "fingerprint": "93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310",
-    "translation_fingerprint": "0bcd16b264d0928b42c1e6ba4fb58e92f80a3e16650a43abe080ec6dc2f02254",
+    "fingerprint": "6b24ed9fedcdd72c1c379a6a9fa397e4c41b8332cfcf676a4cae3eca8d6e997e",
+    "translation_fingerprint": "4fe6ce8a1b2de0db534f06dae187fef736b806fd8400898e75e744818a9937ba",
     "reviewer": "Christian Stephan",
-    "date": "2026-11-16"
+    "date": "2026-11-25"
   },
   {
     "language": "zh",
@@ -266,10 +266,10 @@
   {
     "language": "zh",
     "slug": "quickstart",
-    "fingerprint": "86cf4090a52b3ea8d391e1a37a1038fbbf6b86519dd9a23afd4e7391ceb9b402",
-    "translation_fingerprint": "9a1695d77bddfae1c306cdb487c0e23b1cbc9a53bba76c243c39c61ff36ff790",
+    "fingerprint": "ff09c7857b2e31620d2ae8d74003a0e186283bb52cf0d3334055d5d020980dc4",
+    "translation_fingerprint": "b43ca85ef74676a73ffe1c4500e55be3585759abd5eb82f05b958bc388df7bd0",
     "reviewer": "Christian Stephan",
-    "date": "2026-11-16"
+    "date": "2026-11-25"
   },
   {
     "language": "zh",

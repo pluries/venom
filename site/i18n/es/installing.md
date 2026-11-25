@@ -2,13 +2,13 @@
 translates: installing
 title: Instalación
 description: Cómo instalar venom.
-fingerprint: 93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310
+fingerprint: 6b24ed9fedcdd72c1c379a6a9fa397e4c41b8332cfcf676a4cae3eca8d6e997e
 drafted_by: claude
-drafted_on: 2026-11-16
+drafted_on: 2026-11-24
 status: reviewed
 reviewed_by: Christian Stephan
-reviewed_on: 2026-11-16
-reviewed_fingerprint: 93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310
+reviewed_on: 2026-11-25
+reviewed_fingerprint: 6b24ed9fedcdd72c1c379a6a9fa397e4c41b8332cfcf676a4cae3eca8d6e997e
 ---
 # Instalación {#installing}
 
@@ -16,7 +16,7 @@ reviewed_fingerprint: 93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e88
 
 Cada versión de este fork se publica en https://github.com/pluries/venom/releases/latest. Contiene un ejecutable por plataforma:
 `venom.linux-amd64`, `venom.linux-arm64`, `venom.linux-arm`, `venom.linux-386`, `venom.darwin-amd64`, `venom.darwin-arm64`,
-`venom.windows-amd64.exe`, `venom.freebsd-amd64` y `venom.openbsd-amd64`, además de la lista de sumas de verificación `SHA256SUMS` y su firma `SHA256SUMS.p7s`.
+`venom.linux-ppc64le`, `venom.windows-amd64.exe`, `venom.freebsd-amd64` y `venom.openbsd-amd64`, además de la lista de sumas de verificación `SHA256SUMS`, su firma `SHA256SUMS.p7s` y el token de marca de tiempo de esa firma, `SHA256SUMS.p7s.tsr`.
 
 Ejemplo para Linux:
 

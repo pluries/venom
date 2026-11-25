@@ -2,13 +2,13 @@
 translates: installing
 title: 安装
 description: 如何安装 venom。
-fingerprint: 93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310
+fingerprint: 6b24ed9fedcdd72c1c379a6a9fa397e4c41b8332cfcf676a4cae3eca8d6e997e
 drafted_by: claude
-drafted_on: 2026-11-16
+drafted_on: 2026-11-24
 status: reviewed
 reviewed_by: Christian Stephan
-reviewed_on: 2026-11-16
-reviewed_fingerprint: 93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e8851a310
+reviewed_on: 2026-11-25
+reviewed_fingerprint: 6b24ed9fedcdd72c1c379a6a9fa397e4c41b8332cfcf676a4cae3eca8d6e997e
 ---
 # 安装 {#installing}
 
@@ -16,7 +16,7 @@ reviewed_fingerprint: 93d69cbe8c61d9eee2f2f904a568c6e04dc04f75ad107145a0ef688e88
 
 此分支的每个发布版本都发布在 https://github.com/pluries/venom/releases/latest 。每个平台对应一个可执行文件：
 `venom.linux-amd64`、`venom.linux-arm64`、`venom.linux-arm`、`venom.linux-386`、`venom.darwin-amd64`、`venom.darwin-arm64`、
-`venom.windows-amd64.exe`、`venom.freebsd-amd64` 和 `venom.openbsd-amd64`，此外还有校验和清单 `SHA256SUMS` 及其签名 `SHA256SUMS.p7s`。
+`venom.linux-ppc64le`、`venom.windows-amd64.exe`、`venom.freebsd-amd64` 和 `venom.openbsd-amd64`，此外还有校验和清单 `SHA256SUMS`、其签名 `SHA256SUMS.p7s` 以及该签名的时间戳令牌 `SHA256SUMS.p7s.tsr`。
 
 Linux 示例：
 

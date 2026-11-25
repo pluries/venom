@@ -76,7 +76,7 @@ It can also generate xUnit result files.
 
 Every release of this fork is published at https://github.com/pluries/venom/releases/latest. It holds one executable per platform:
 `venom.linux-amd64`, `venom.linux-arm64`, `venom.linux-arm`, `venom.linux-386`, `venom.darwin-amd64`, `venom.darwin-arm64`,
-`venom.windows-amd64.exe`, `venom.freebsd-amd64` and `venom.openbsd-amd64`, plus the checksum list `SHA256SUMS` and its signature `SHA256SUMS.p7s`.
+`venom.linux-ppc64le`, `venom.windows-amd64.exe`, `venom.freebsd-amd64` and `venom.openbsd-amd64`, plus the checksum list `SHA256SUMS`, its signature `SHA256SUMS.p7s` and the timestamp token of that signature, `SHA256SUMS.p7s.tsr`.
 
 Example for Linux:
 

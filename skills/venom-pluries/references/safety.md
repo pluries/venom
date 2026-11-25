@@ -31,7 +31,8 @@ fingerprint (in `release.env` and in `SKILL.md`) to narrow that.
 ## No secret in a file, a log or a command line
 
 Credentials come from the environment, a CI secret variable or `--var-from-file`. They are never written in a suite, a pipeline
-file, a result, a log or a command line. Do not read `.env` files or key files to fill a value; ask the developer to set it.
+file, a result, a log or a command line. Do not read `.env` files, key files or config files that hold a token or a credential to fill a value, and never open a file
+only to check whether it holds one; ask the developer to set the variable.
 
 ## No production target
 

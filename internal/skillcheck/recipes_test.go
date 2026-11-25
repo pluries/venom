@@ -35,6 +35,15 @@ func TestRecipes_US4AS5_VersionRule(t *testing.T) {
 	requireParagraph(t, text, `(never|not|no)\b`, `(write|writes|writing)`, `recipe`, `(cannot run|can't run|pinned)`)
 }
 
+// US4-AS2 (0.1.5, evaluation of 0.1.4 runs web-f2, web-g1, web-bare-g1, web-bare-g2): the recipe check ties every testcase
+// to a scenario of a spec. With no spec for the page the skill asks the developer for the scenarios; it writes no spec and
+// invents no scenario from what the page does today.
+func TestRecipes_US4AS2_NoSpecWrittenUnasked(t *testing.T) {
+	text := recipesText(t)
+	requireParagraph(t, text, `\bspec\b`, `\bask`, `scenario`)
+	requireParagraph(t, text, `\bspec\b`, `(never|not|no)\b`, `(write|writes|writing|invent)`)
+}
+
 // US4-AS2, FR-010: recipes.md runs `venom recipe check` with the project's spec folder, and does not call a recipe
 // proven until the check is clean and its negative control fails as expected.
 func TestRecipes_US4AS2_RecipeCheck(t *testing.T) {

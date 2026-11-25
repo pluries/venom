@@ -51,8 +51,9 @@ output_dir: tests/venom/results
   `export VENOM_VAR_token=<token>`), or in a variable file that the developer creates themselves and passes with
   `--var-from-file`. If the variable is not set, stop and ask the developer; do not fill it in yourself.
 - Never pass a credential with `--var` on the command line: it shows in the process list and the shell history.
-- Do not read `.env` files, key files or credential stores into the session to fill a value. Ask the developer to set the
-  variable.
+- Do not read `.env` files, key files, credential stores or config files that hold a token (`config.yml`, `settings.json`,
+  `application.properties` and the like) into the session to fill a value. A file you cannot tell is free of credentials is not
+  read: look at its name only, and ask the developer which variable holds the value and to set that variable.
 - Add the results folder, and any variable file the developer creates with real values, to `.gitignore`. Warn the developer that the results
   of a CI run can hold response data (bodies, headers), so keep them as private artifacts.
 
