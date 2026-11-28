@@ -176,6 +176,13 @@
       "description": "Check that a release is signed by the maintainer's certificate."
     },
     {
+      "slug": "skill",
+      "title": "Use it from Claude Code",
+      "source": "site/pages/skill.md",
+      "group": "Guides",
+      "description": "Install the venom-pluries skill so that Claude Code sets Venom Pluries up in your project."
+    },
+    {
       "slug": "contributing",
       "title": "Contributing",
       "source": "CONTRIBUTING.md",

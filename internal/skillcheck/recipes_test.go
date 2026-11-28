@@ -53,3 +53,14 @@ func TestRecipes_US4AS2_RecipeCheck(t *testing.T) {
 	requireParagraph(t, text, `negative control`, `(proven|prove)`, `(clean|no finding)`)
 	require.Regexp(t, regexp.MustCompile(`(?i)findings?`), text)
 }
+
+// US4-AS1 (0.1.9, evaluation of 0.1.8: web run q1 stopped for the scenarios and the documentation and wrote no recipe, q2 and q3 wrote one):
+// with no spec for the page the skill still writes the first recipe from what the page offers, replays it, runs the check and reports its
+// findings as such, and asks for the scenarios after; it does not stop before a recipe exists. The documentation page is read with an approved
+// command when the fetch tool is not allowed.
+func TestRecipes_US4AS1_FirstRecipeBeforeTheScenarios(t *testing.T) {
+	text := recipesText(t)
+	requireParagraph(t, text, `provisional`, `(no|without|has no) spec`, `do not stop`, `replay`, `ask for the scenarios`)
+	requireParagraph(t, text, `recipes[.]html`, `fetch tool`, `approv`)
+	requireParagraph(t, text, `curl -fsSL https://venom[.]pluries[.]dev/recipes[.]html`)
+}

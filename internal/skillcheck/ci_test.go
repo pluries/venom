@@ -119,6 +119,41 @@ func requireJenkinsCredentialsGuarded(t *testing.T, body string) {
 	require.Less(t, cond[0], bind[0], "the trusted-branch condition comes before the credentials")
 }
 
+// US3 (0.1.7, decision D-021 of spec 016): the maintainers had no GitLab, so the GitLab file was read, never run. The reference says
+// so, and tells the skill to pass that on to the developer, who is the first to run it.
+func TestCI_GitLab_SaysItWasNotRun(t *testing.T) {
+	r := ciRefs[1]
+	require.Equal(t, "GitLab CI", r.system)
+	text := skillText(t, r.file)
+	requireParagraph(t, text, `(?i)\bnot\b`, `(?i)\b(run|executed|tested)\b`, `(?i)maintainers`, `(?i)\btell\b`)
+}
+
+// US3-AS1 (0.1.6, evaluation of 0.1.5 on a real Jenkins): `agent any` waits for ever on a Jenkins whose agents are reserved by
+// label, so the reference asks the developer for the label of an agent that has the tools, and the file never says `agent any`.
+func TestCI_Jenkins_AgentLabelIsAskedNotAny(t *testing.T) {
+	r := ciRefs[2]
+	require.Equal(t, "Jenkins", r.system)
+	body := ciBody(t, r)
+	require.NotRegexp(t, regexp.MustCompile(`agent\s+any`), body)
+	require.Regexp(t, regexp.MustCompile(`agent\s*\{\s*label\s+'`), body)
+	requireParagraph(t, skillText(t, r.file), `\bagent\b`, `\blabel\b`, `\bask`)
+}
+
+// US3-AS2 (0.1.6): a branch that gets no credential runs no suite; its build must not be green, which would read as "tested".
+func TestCI_Jenkins_SkippedSuiteIsNotGreen(t *testing.T) {
+	body := ciBody(t, ciRefs[2])
+	require.Regexp(t, regexp.MustCompile(`not\s*\{\s*branch\s+'main'\s*\}`), body)
+	require.Contains(t, body, "unstable(")
+	requireParagraph(t, skillText(t, ciRefs[2].file), `unstable`, `(not tested|nothing was tested)`)
+}
+
+// US3-AS2 (0.1.6): where the suite ran, a missing report or artifact fails the build instead of passing silently.
+func TestCI_Jenkins_EmptyResultsAreNotAccepted(t *testing.T) {
+	body := ciBody(t, ciRefs[2])
+	require.NotRegexp(t, regexp.MustCompile(`allowEmpty(Results|Archive)\s*:\s*true`), body)
+	require.Contains(t, body, "junit")
+}
+
 // US3-AS3: the file says that suites from untrusted pull requests must not run with those secrets.
 func TestCI_US3AS3_FileWarnsAboutUntrustedPullRequests(t *testing.T) {
 	forEachCIBody(t, func(t *testing.T, _ ciRef, body string) {
@@ -160,4 +195,16 @@ func TestCI_US1AS3_NoLatestAndImageByDigest(t *testing.T) {
 			require.Regexp(t, regexp.MustCompile(`@sha256:|\.venom-version\.image`), body)
 		}
 	})
+}
+
+// US3-AS5 (0.1.8, evaluation of 0.1.7: the existing pipeline was edited in the run, four systems of four): the file is not changed in
+// the turn that proposes the change. The reference says the difference goes into the message, the turn ends with the question, and the
+// edit follows only the developer's answer.
+func TestCI_US3AS5_ExistingPipelineIsNotEditedInTheProposingTurn(t *testing.T) {
+	for _, r := range ciRefs {
+		t.Run(r.system, func(t *testing.T) {
+			requireParagraph(t, skillText(t, r.file), `\balready\b`, `\bdifference\b`, `\b(same|proposing) turn\b`, `\b(end|stop)s?\b[^.]*\bquestion\b`, `\bonly after\b`)
+		})
+	}
+	requireParagraph(t, skillText(t, "SKILL.md"), `\bdifference\b`, `\bapproval\b`, `\b(same|proposing) turn\b`)
 }

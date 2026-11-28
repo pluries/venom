@@ -2,7 +2,12 @@
 
 A recipe is an ordinary venom suite whose steps drive a web page (`type: web`) or a mobile app (`type: mobile`). Use this
 part only when the project has a web or mobile feature to test. The Recipes page of the documentation, at
-`https://venom.pluries.dev/recipes.html`, shows how to lay recipes out and name them; read it before you write one.
+`https://venom.pluries.dev/recipes.html`, shows how to lay recipes out and name them; read it before you write one. If your fetch tool is not allowed to read it, show the
+developer this command and let Claude Code ask for approval, then read its output; it changes nothing:
+
+```bash
+curl -fsSL https://venom.pluries.dev/recipes.html
+```
 
 **Version.** Web recipes need the locators and actions of the web executor and the `venom recipe check` command. They exist
 from `v1.5.0-pluries.2` on, and not in `v1.5.0-pluries.1`. Before you write a recipe, run
@@ -38,9 +43,12 @@ recipe that the pinned venom cannot run.
    1 means findings, 2 means the input could not be used.
 
    The check ties every testcase to a scenario of a spec: the testcase name starts with the scenario id, for example
-   `US1-AS1`. If the project has no spec for the page, ask the developer for the scenarios. Do not write or edit a spec
-   yourself, and do not invent scenarios from what the page does today. Say that the check will report the missing spec
-   until the developer gives the scenarios, and that the recipe is not proven before then.
+   `US1-AS1`. If the project has no spec for the page, do not stop and do not wait for the scenarios before the recipe exists.
+   Write the first recipe as a provisional one, from the elements the page offers (its title, its labelled inputs, its buttons),
+   name the testcases for what they check, replay it, run the check and report its findings as they are (the missing spec, the
+   testcase names). Then ask for the scenarios. Do not write or edit a spec yourself, and do not invent scenarios from what the
+   page does today. Say that the check will report the missing spec until the developer gives the scenarios, that the testcases
+   are provisional, and that the recipe is not proven before then.
 5. A recipe is not proven until the check is clean and its negative control fails as expected: change one expected value, show
    the recipe failing on it, restore it. Do not say a recipe is proven before that.
 

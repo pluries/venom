@@ -3,8 +3,9 @@
 Use this when the project builds with GitHub Actions. The file below runs the suite with the pinned venom, fails the build when a test fails,
 keeps the results as an artifact and gives credentials only from the system's secret variables.
 
-- Before you add the file, check whether the project already has one. If it does, show the difference and get the developer's
-  approval before you change it. Never overwrite a pipeline file silently.
+- Before you add the file, check whether the project already has one. If it does, do not change it in the same turn that proposes the
+  change: put the difference in your message, end the turn with the question, and edit the file only after the developer has
+  approved it by answering yes. Never overwrite a pipeline file silently.
 - The file calls `tools/venom/install-venom.sh` (copied into the project, see `install.md`), which checks the download before it
   installs anything. If that step fails, the build fails before any suite runs.
 - The version comes from `.venom-version`, the file that every machine and pipeline of the project reads.

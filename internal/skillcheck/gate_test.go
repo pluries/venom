@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -113,7 +114,35 @@ func requireEvaluationReport(t *testing.T) {
 	require.NoError(t, err, "no evaluation report for skill version %s", version)
 	spec := standardSpec()
 	spec.skillVersion = version
+	spec.answered = answeredDecisions(t)
+	spec.reportExists = func(path string) bool {
+		_, err := os.Stat(filepath.Join(repoRoot(t), filepath.FromSlash(path)))
+		return err == nil
+	}
 	require.Empty(t, checkEvaluationReport(string(b), spec))
+}
+
+var (
+	decisionHeading = regexp.MustCompile(`^## (D-[0-9]+)`)
+	statusAnswered  = regexp.MustCompile(`^\|\s*Status\s*\|\s*answered\s*\|`)
+)
+
+// answeredDecisions lists the decisions of the spec of this skill that are answered (FR-017 as amended by D-022: an
+// accepted exception may cite only these).
+func answeredDecisions(t *testing.T) map[string]bool {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "specs", "016-venom-adoption-skill", "decisions.md"))
+	require.NoError(t, err)
+	ids := map[string]bool{}
+	current := ""
+	for _, line := range splitLines(string(b)) {
+		if m := decisionHeading.FindStringSubmatch(line); m != nil {
+			current = m[1]
+		} else if current != "" && statusAnswered.MatchString(line) {
+			ids[current] = true
+		}
+	}
+	return ids
 }
 
 // FR-018, US6: the release gate. It runs only when SKILL_RELEASE_GATE=1 (the release procedure sets it) and only
