@@ -2,7 +2,7 @@
 translates: skill
 title: 在 Claude Code 中使用
 description: 安装 venom-pluries 技能，让 Claude Code 在您的项目中配置 Venom Pluries。
-fingerprint: ee9619c51479fe441be081d380614b2cd7bc62c1c2f86e5b8c338448a471a5ba
+fingerprint: d7f89518bebf2fcf0f7a15898d97748d2257db0cefe23caabcf8a0dd26d922b6
 drafted_by: claude
 drafted_on: 2026-11-27
 status: machine-drafted
@@ -14,7 +14,7 @@ status: machine-drafted
 请指定一个发布标签。不要从会不断变化的默认分支安装。
 
 ```bash
-$ npx skills add pluries/venom@skill-v1.0.0 --skill venom-pluries
+$ npx skills add pluries/venom@skill-v1.0.1 --skill venom-pluries
 ```
 
 该工具会询问为哪个代理安装：请选择 Claude Code。它把技能放进项目的 `venom-pluries`（`skills` 之下，`.claude` 之内） 文件夹，并在旁边写入 `skills-lock.json`。除非您事先设置 `DISABLE_TELEMETRY=1`（或 `DO_NOT_TRACK=1`），该工具会发送匿名使用数据。
@@ -24,7 +24,7 @@ $ npx skills add pluries/venom@skill-v1.0.0 --skill venom-pluries
 想看清复制了什么？请克隆该标签，自己复制文件夹：
 
 ```bash
-$ git clone --depth 1 --branch skill-v1.0.0 https://github.com/pluries/venom venom-skill
+$ git clone --depth 1 --branch skill-v1.0.1 https://github.com/pluries/venom venom-skill
 ```
 
 把该克隆中的 `skills/venom-pluries/` 文件夹复制到项目的 `venom-pluries`（`skills` 之下，`.claude` 之内） 文件夹，然后删除克隆。

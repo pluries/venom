@@ -40,7 +40,8 @@
       "skip": [
         "Table of contents",
         "🐍 Venom",
-        "Contributing"
+        "Contributing",
+        "Use it from Claude Code"
       ],
       "sections": [
         {

@@ -5,7 +5,7 @@ The `venom-pluries` skill lets Claude Code set Venom Pluries up in your project.
 Name a release tag. Never install from the moving default branch.
 
 ```bash
-$ npx skills add pluries/venom@skill-v1.0.0 --skill venom-pluries
+$ npx skills add pluries/venom@skill-v1.0.1 --skill venom-pluries
 ```
 
 The tool asks which agent to install for; choose Claude Code. It puts the skill in the `venom-pluries` (under `skills`, inside `.claude`) folder of your project and writes a `skills-lock.json` next to it. The tool sends anonymous usage data unless you set `DISABLE_TELEMETRY=1` (or `DO_NOT_TRACK=1`) first.
@@ -15,7 +15,7 @@ Skills run with the permissions of your agent. Read the `SKILL.md` in the instal
 Prefer to see what is copied? Clone the tag and copy the folder yourself:
 
 ```bash
-$ git clone --depth 1 --branch skill-v1.0.0 https://github.com/pluries/venom venom-skill
+$ git clone --depth 1 --branch skill-v1.0.1 https://github.com/pluries/venom venom-skill
 ```
 
 Copy the `skills/venom-pluries/` folder of that clone into the `venom-pluries` (under `skills`, inside `.claude`) folder of your project, then delete the clone.

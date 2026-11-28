@@ -7,7 +7,7 @@ description: Set up Venom Pluries, a command line tool that runs integration tes
 
 | | |
 |---|---|
-| Skill version | 1.0.0 |
+| Skill version | 1.0.1 |
 | Venom version it targets | v1.5.0-pluries.2 |
 | Release repository | pluries/venom |
 | Signer fingerprint (SHA-256) | `42632819c286ec58a829fea06323c5e53772982d7eaff3d2756bd997527a54f2` |

@@ -11,9 +11,18 @@ git clone --depth 1 --branch <tag> https://github.com/pluries/venom venom-skill
 ```
 
 Then copy the folder `skills/venom-pluries/` of that clone into `.claude/skills/venom-pluries/` of the project, after showing the
-developer the difference with the copy that is there, and delete the clone. The one-command install of the skill tool
-(`npx skills add`) may be used only in the form that names a tag or a commit; check its documentation for that form before you
-use it, and never run it without one.
+developer the difference with the copy that is there, and delete the clone.
+
+The one-command install of the skill tool works from the public repository when it names a tag. This is the form that was run against
+the public fork and installed a folder identical to the tag:
+
+```bash
+DISABLE_TELEMETRY=1 DO_NOT_TRACK=1 npx skills add pluries/venom@<tag> --skill venom-pluries -a claude-code -y --copy
+```
+
+Show the developer this command and let Claude Code ask for approval. The tool sends anonymous usage data unless the two switches are set.
+It writes the skill into the project and a `skills-lock.json` that records the commit of the tag; check that the `Skill version` row of the
+installed `SKILL.md` is the version of the tag. Never run it without a tag or a commit.
 
 A new skill version changes `release.env`. Compare its `SIGNER_SHA256` with the one the project's copy of the scripts uses
 (`tools/venom/release.env`). If they differ, the signing certificate was renewed: copy the new scripts and `release.env` into

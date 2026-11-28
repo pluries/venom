@@ -17,6 +17,7 @@ Venom is a CLI (Command Line Interface) that aims to create, manage and run your
   - [Install from binaries](#install-from-binaries)
 - [Updating](#updating)
 - [Docker image](#docker-image)
+- [Use it from Claude Code](#use-it-from-claude-code)
 - [CLI Usage](#cli-usage)
   - [Run test suites in a specific order](#run-test-suites-in-a-specific-order)
   - [Globstar support](#globstar-support)
@@ -124,6 +125,16 @@ $ docker run --mount type=bind,source=$(pwd)/tests,target=/workdir/tests --mount
 ```
 
 Each release also has its own image tag, for example `ghcr.io/pluries/venom:v1.5.0-pluries.1`. Use a release tag in a pipeline so that the image does not change under you.
+
+# Use it from Claude Code
+
+The `venom-pluries` skill lets Claude Code set Venom Pluries up in your project: it installs a checked release, writes a first test suite, adds the step to your build and checks recipes for web and mobile pages. You approve each command it wants to run. Install it at a release tag, never from the default branch:
+
+```bash
+$ npx skills add pluries/venom@skill-v1.0.1 --skill venom-pluries
+```
+
+The tool sends anonymous usage data unless you set `DISABLE_TELEMETRY=1` first, and skills run with the permissions of your agent: read the `SKILL.md` in the installed folder before you use it. More on the page [Use it from Claude Code](https://venom.pluries.dev/skill.html).
 
 # CLI Usage
 

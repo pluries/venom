@@ -2,7 +2,7 @@
 translates: skill
 title: L'utiliser depuis Claude Code
 description: Installez la compétence venom-pluries pour que Claude Code configure Venom Pluries dans votre projet.
-fingerprint: ee9619c51479fe441be081d380614b2cd7bc62c1c2f86e5b8c338448a471a5ba
+fingerprint: d7f89518bebf2fcf0f7a15898d97748d2257db0cefe23caabcf8a0dd26d922b6
 drafted_by: claude
 drafted_on: 2026-11-27
 status: machine-drafted
@@ -14,7 +14,7 @@ La compétence `venom-pluries` permet à Claude Code de configurer Venom Pluries
 Indiquez une étiquette de version. N'installez jamais depuis la branche par défaut, qui bouge.
 
 ```bash
-$ npx skills add pluries/venom@skill-v1.0.0 --skill venom-pluries
+$ npx skills add pluries/venom@skill-v1.0.1 --skill venom-pluries
 ```
 
 L'outil demande pour quel agent installer : choisissez Claude Code. Il place la compétence dans le dossier `venom-pluries` (sous `skills`, dans `.claude`) de votre projet et écrit un fichier `skills-lock.json` à côté. L'outil envoie des données d'usage anonymes, sauf si vous définissez d'abord `DISABLE_TELEMETRY=1` (ou `DO_NOT_TRACK=1`).
@@ -24,7 +24,7 @@ Les compétences s'exécutent avec les droits de votre agent. Lisez le `SKILL.md
 Vous préférez voir ce qui est copié ? Clonez l'étiquette et copiez le dossier vous-même :
 
 ```bash
-$ git clone --depth 1 --branch skill-v1.0.0 https://github.com/pluries/venom venom-skill
+$ git clone --depth 1 --branch skill-v1.0.1 https://github.com/pluries/venom venom-skill
 ```
 
 Copiez le dossier `skills/venom-pluries/` de ce clone dans le dossier `venom-pluries` (sous `skills`, dans `.claude`) de votre projet, puis supprimez le clone.
